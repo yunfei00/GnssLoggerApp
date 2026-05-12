@@ -1,0 +1,30 @@
+<resources>
+    <string name="app_name">GNSS Data Logger</string>
+    <string name="section_status">状态</string>
+    <string name="section_config">配置</string>
+    <string name="section_satellites">实时卫星</string>
+    <string name="label_satellite_table_hint">列表与顶部统计一致，共 %1$d 条；请向下滚动查看全部。</string>
+    <string name="status_idle">采集状态：未启动</string>
+    <string name="status_logging">采集状态：采集中</string>
+    <string name="status_stopped">采集状态：已停止</string>
+    <string name="action_start">开始采集</string>
+    <string name="action_stop">停止采集</string>
+    <string name="action_open_dir">打开保存目录</string>
+    <string name="action_test_scene">测试写入一条场景</string>
+    <string name="label_save_dir">保存目录</string>
+    <string name="hint_filename_prefix">文件名前缀</string>
+    <string name="switch_date_subdir">按日期创建子目录</string>
+    <string name="switch_nmea_placeholder">记录 NMEA（预留，当前不采集）</string>
+    <string name="hint_background_location">长时间后台采集建议在系统设置中将本应用位置权限设为「始终允许」，否则息屏或一段时间后可能被系统暂停。</string>
+    <string name="toast_permissions_required">请先授予所需权限</string>
+    <string name="toast_open_dir_failed">无法打开目录，路径已显示在界面中</string>
+    <string name="label_scene">当前场景：%1$s</string>
+    <string name="label_csv">CSV：%1$s</string>
+    <string name="label_counts">可见卫星：%1$d，参与定位：%2$d，已写入行：%3$d</string>
+    <string name="label_last_update">最近更新：%1$s</string>
+    <string name="label_session">会话 ID：%1$s</string>
+    <string name="dialog_bg_location_title">后台定位权限</string>
+    <string name="dialog_bg_location_message">自动化长时间采集需要「始终允许」定位权限。请在下一步中选择「始终允许」，或稍后在系统设置中开启。</string>
+    <string name="action_grant">去授权</string>
+    <string name="action_skip">跳过</string>
+</resources>

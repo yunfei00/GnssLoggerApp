@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 卫星表行估算高度：与 item_satellite_row 单行 + padding 接近，用于 ScrollView 内 RecyclerView 总高度 -->
+    <dimen name="satellite_table_row_height">52dp</dimen>
+</resources>
