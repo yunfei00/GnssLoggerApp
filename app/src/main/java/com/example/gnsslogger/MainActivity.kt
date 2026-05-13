@@ -31,6 +31,8 @@ import com.example.gnsslogger.data.GnssSessionState
 import com.example.gnsslogger.data.LoggingUiStatus
 import com.example.gnsslogger.databinding.ActivityMainBinding
 import com.example.gnsslogger.storage.KmlExporter
+import com.example.gnsslogger.storage.NmeaExporter
+import com.example.gnsslogger.storage.NoValidNmeaSentencesException
 import com.example.gnsslogger.storage.NoValidTrackPointsException
 import com.example.gnsslogger.ui.MainViewModel
 import com.example.gnsslogger.ui.SatelliteTableAdapter
@@ -258,6 +260,9 @@ class MainActivity : AppCompatActivity() {
     private fun buildFileStatusLines(state: GnssSessionState): List<String> = listOf(
         "location.csv：${generatedStatus(state.locationCsvPath)}",
         "satellites.csv：${generatedStatus(state.csvPath)}",
+        "raw.csv：${generatedStatus(state.rawCsvPath)}",
+        "nmea.csv：${generatedStatus(state.nmeaCsvPath)}",
+        "standard.nmea：${standardNmeaStatus(state)}",
         "track.kml：${trackKmlStatus(state)}",
     )
 
@@ -324,6 +329,15 @@ class MainActivity : AppCompatActivity() {
         return if (state.status == LoggingUiStatus.STOPPED) "未生成" else "停止采集后生成"
     }
 
+    private fun standardNmeaStatus(state: GnssSessionState): String {
+        if (state.nmeaTextPath?.let(::isGeneratedFile) == true) return "已生成"
+        if (state.nmeaCsvPath == null) return "未开启 NMEA 记录"
+        if (state.lastError?.contains("无有效 NMEA", ignoreCase = true) == true) {
+            return "未生成，无有效 NMEA 语句"
+        }
+        return if (state.status == LoggingUiStatus.STOPPED) "未生成" else "停止采集后生成"
+    }
+
     private fun buildExportStatusText(state: GnssSessionState): String? {
         if (state.status != LoggingUiStatus.STOPPED || state.csvPath == null && state.locationCsvPath == null) {
             return null
@@ -333,7 +347,7 @@ class MainActivity : AppCompatActivity() {
                 "已生成 CSV 和 KML；有效轨迹点不足 2 个，KML 未生成轨迹线。"
 
             state.trackKmlPath?.let(::isGeneratedFile) == true ->
-                "已生成 CSV 和 KML，KML 可导入 Google Earth Pro。"
+                "已生成 CSV、标准 NMEA 和 KML，KML 可导入 Google Earth Pro。"
 
             hasNoValidTrackPointMessage(state.lastError) ->
                 "已生成 CSV；track.kml：未生成，无有效轨迹点。"
@@ -349,11 +363,17 @@ class MainActivity : AppCompatActivity() {
         message?.contains("无有效", ignoreCase = true) == true
 
     private fun isExportInfoMessage(message: String): Boolean =
-        message.startsWith("已生成 CSV") ||
-            message.startsWith("KML 已生成") ||
-            message.startsWith("track.kml 已生成") ||
-            message.startsWith("track.kml：未生成") ||
-            message.contains("没有有效经纬度")
+        message.lineSequence()
+            .filter { it.isNotBlank() }
+            .all { line ->
+                line.startsWith("已生成 CSV") ||
+                    line.startsWith("KML 已生成") ||
+                    line.startsWith("standard.nmea 已生成") ||
+                    line.startsWith("standard.nmea：未生成") ||
+                    line.startsWith("track.kml 已生成") ||
+                    line.startsWith("track.kml：未生成") ||
+                    line.contains("没有有效经纬度")
+            }
 
     /**
      * RecyclerView 放在 [Nested]ScrollView 里且高度为 wrap_content 时，系统常把 RV 测成「约一两行」，
@@ -467,9 +487,40 @@ class MainActivity : AppCompatActivity() {
     private fun prepareExportFiles(state: GnssSessionState): ExportFiles {
         val locationFile = state.locationCsvPath?.let(::File)?.takeIf(::isShareableFile)
         val satelliteFile = state.csvPath?.let(::File)?.takeIf(::isShareableFile)
+        val rawCsvFile = state.rawCsvPath?.let(::File)?.takeIf(::isShareableFile)
+        val nmeaCsvFile = state.nmeaCsvPath?.let(::File)?.takeIf(::isShareableFile)
+        val standardNmeaFile = ensureStandardNmea(state, nmeaCsvFile)?.takeIf(::isShareableFile)
         val kmlFile = ensureTrackKml(state, locationFile)?.takeIf(::isShareableFile)
-        val files = listOfNotNull(locationFile, satelliteFile, kmlFile).distinctBy { it.absolutePath }
+        val files = listOfNotNull(
+            rawCsvFile,
+            standardNmeaFile,
+            locationFile,
+            kmlFile,
+            satelliteFile,
+            nmeaCsvFile,
+        ).distinctBy { it.absolutePath }
+        logExportFiles("Prepared GNSS export files", files)
         return ExportFiles(files = files, sessionName = sessionNameFor(state, files))
+    }
+
+    private fun ensureStandardNmea(state: GnssSessionState, nmeaCsvFile: File?): File? {
+        val existingNmeaFile = state.nmeaTextPath?.let(::File)
+        if (existingNmeaFile?.let(::isShareableFile) == true) return existingNmeaFile
+
+        val outputNmea = existingNmeaFile
+            ?: nmeaCsvFile?.let(::standardNmeaFileForNmeaCsv)
+            ?: return null
+        if (nmeaCsvFile == null || !nmeaCsvFile.exists() || !nmeaCsvFile.isFile) return null
+
+        return try {
+            NmeaExporter.exportFromNmeaCsv(nmeaCsvFile, outputNmea).outputFile
+        } catch (e: NoValidNmeaSentencesException) {
+            Log.w(TAG, "Cannot export standard NMEA: ${e.message}")
+            null
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to export standard NMEA from ${nmeaCsvFile.absolutePath}", e)
+            null
+        }
     }
 
     private fun ensureTrackKml(state: GnssSessionState, locationFile: File?): File? {
@@ -500,6 +551,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 saveFileToDownloadsLegacy(file, sessionName)
             }
+            Log.i(TAG, "Saved GNSS export file to $relativePath${file.name}")
         }
         return relativePath
     }
@@ -553,11 +605,27 @@ class MainActivity : AppCompatActivity() {
         return locationFile.parentFile?.let { File(it, kmlName) } ?: File(kmlName)
     }
 
+    private fun standardNmeaFileForNmeaCsv(nmeaCsvFile: File): File {
+        val nmeaName = if (nmeaCsvFile.name.endsWith("_nmea.csv")) {
+            nmeaCsvFile.name.removeSuffix("_nmea.csv") + ".nmea"
+        } else {
+            nmeaCsvFile.nameWithoutExtension + ".nmea"
+        }
+        return nmeaCsvFile.parentFile?.let { File(it, nmeaName) } ?: File(nmeaName)
+    }
+
     private fun isShareableFile(file: File): Boolean =
         file.exists() && file.isFile && file.length() > 0L
 
     private fun sessionNameFor(state: GnssSessionState, files: List<File>): String {
-        val fromPath = sequenceOf(state.locationCsvPath, state.csvPath, state.trackKmlPath)
+        val fromPath = sequenceOf(
+            state.locationCsvPath,
+            state.csvPath,
+            state.rawCsvPath,
+            state.nmeaCsvPath,
+            state.nmeaTextPath,
+            state.trackKmlPath,
+        )
             .filterNotNull()
             .map { File(it) }
             .plus(files.asSequence())
@@ -567,10 +635,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun sessionNameFromFileName(name: String): String? {
-        val suffixes = listOf("_location.csv", "_satellites.csv", "_track.kml")
+        val suffixes = listOf("_location.csv", "_satellites.csv", "_raw.csv", "_nmea.csv", "_track.kml", ".nmea")
         return suffixes.firstNotNullOfOrNull { suffix ->
             name.takeIf { it.endsWith(suffix) }?.removeSuffix(suffix)
         }
+    }
+
+    private fun logExportFiles(prefix: String, files: List<File>) {
+        if (files.isEmpty()) return
+        Log.i(TAG, "$prefix:\n${files.joinToString(separator = "\n") { it.absolutePath }}")
     }
 
     private fun sanitizePathSegment(raw: String): String =
@@ -582,6 +655,7 @@ class MainActivity : AppCompatActivity() {
     private fun mimeTypeFor(file: File): String =
         when (file.extension.lowercase()) {
             "csv" -> "text/csv"
+            "nmea" -> "application/octet-stream"
             "kml" -> "application/vnd.google-earth.kml+xml"
             else -> "application/octet-stream"
         }

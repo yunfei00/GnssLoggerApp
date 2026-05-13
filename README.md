@@ -32,8 +32,8 @@
 4. 采集中可随时修改测试场景标签，后续 CSV 行会写入新的 `scene_name`。
 5. 当 `accuracy_m <= 20m` 时自动进入正式记录；如果 30 秒仍未达标，会继续记录并提示当前精度较差。
 6. 点击 **停止采集**：关闭写入并结束前台服务；下次开始会生成新的 `session_id` 与新 CSV 文件。
-7. 停止采集后会生成 CSV 和 KML，并在界面显示 `location.csv`、`satellites.csv`、`track.kml` 的生成状态和本次统计。
-8. 点击 **分享本次数据** 可通过系统分享面板把本次 `*_location.csv`、`*_satellites.csv`、`*_track.kml` 发送到电脑或其它应用。
+7. 停止采集后会生成 CSV、标准 NMEA 和 KML，并在界面显示 `location.csv`、`satellites.csv`、`standard.nmea`、`track.kml` 的生成状态和本次统计。
+8. 点击 **分享本次数据** 可通过系统分享面板把本次 CSV、标准 `*.nmea` 与 `*_track.kml` 发送到电脑或其它应用。
 9. 点击 **保存到下载目录** 可将本次文件复制到 `Download/GnssLogger/<session_name>/`。
 
 CSV 默认目录（与 Android 应用专属外部目录一致）：
@@ -84,16 +84,21 @@ adb shell am broadcast -n com.example.gnsslogger/com.example.gnsslogger.GnssComm
 
 - `*_location.csv`：定位轨迹，包含经纬度、海拔、速度、精度、质量等级与当时卫星摘要。
 - `*_satellites.csv`：卫星状态，包含每颗卫星的 C/N0、方位角、仰角、`used_in_fix` 与每帧 `used_in_fix_count`。
-- `*_nmea.csv`：NMEA 原始语句（开启 NMEA 记录时生成）。
+- `*_nmea.csv`：带时间戳、设备信息、会话 ID 与 `message` 字段的 NMEA CSV 日志（开启 NMEA 记录时生成）。
+- `*.nmea`：标准纯文本 NMEA 文件，每行只有一条以 `$` 开头的 NMEA 语句，可用于 GSS7000 等需要标准 NMEA 输入的工具。
 - `*_raw.csv`：GNSS Raw Measurement（开启 Raw 记录时生成）。
 - `*_track.kml`：基于 `*_location.csv` 生成的 Google Earth Pro 轨迹文件。
 
-停止采集时，App 会自动根据 `*_location.csv` 生成同名前缀的 `*_track.kml`。例如：
+停止采集时，App 会自动根据 `*_nmea.csv` 生成同会话前缀的标准 `*.nmea`，并根据 `*_location.csv` 生成同名前缀的 `*_track.kml`。例如：
 
 - `session_20260513_153000_location.csv`
+- `session_20260513_153000_nmea.csv`
+- `session_20260513_153000.nmea`
 - `session_20260513_153000_track.kml`
 
-停止采集后，App 会提示 CSV 和 KML 的生成结果。点击 **分享本次数据** 时会分享本次 `*_location.csv`、`*_satellites.csv` 与 `*_track.kml`；如果 KML 文件不存在，App 会尝试根据 `*_location.csv` 重新生成。点击 **保存到下载目录** 时会把这些文件复制到：
+标准 `*.nmea` 文件不是 CSV：不会写入 `timestamp_ms`、`device_model`、`session_id` 等字段，也不会写入 CSV 表头；每一行只保留 `message` 字段中的 NMEA 语句本身。
+
+停止采集后，App 会提示 CSV、标准 NMEA 和 KML 的生成结果。点击 **分享本次数据** 时会分享本次 `*_raw.csv`、`*.nmea`、`*_location.csv`、`*_track.kml`、`*_satellites.csv` 与 `*_nmea.csv`；如果标准 NMEA 或 KML 文件不存在，App 会尝试分别根据 `*_nmea.csv` 或 `*_location.csv` 重新生成。点击 **保存到下载目录** 时会把这些文件复制到：
 
 `Download/GnssLogger/<session_name>/`
 

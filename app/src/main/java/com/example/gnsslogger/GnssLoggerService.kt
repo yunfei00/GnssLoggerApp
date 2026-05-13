@@ -26,6 +26,8 @@ import com.example.gnsslogger.storage.CsvGnssWriter
 import com.example.gnsslogger.storage.KmlExporter
 import com.example.gnsslogger.storage.LocationCsvLogger
 import com.example.gnsslogger.storage.LogFileManager
+import com.example.gnsslogger.storage.NmeaExporter
+import com.example.gnsslogger.storage.NoValidNmeaSentencesException
 import com.example.gnsslogger.storage.NoValidTrackPointsException
 import com.example.gnsslogger.util.DeviceInfo
 import com.example.gnsslogger.util.NotificationHelper
@@ -49,6 +51,7 @@ class GnssLoggerService : Service() {
     private var csvPath: String? = null
     private var rawCsvPath: String? = null
     private var nmeaCsvPath: String? = null
+    private var nmeaTextPath: String? = null
     private var sessionDirectoryPath: String? = null
     private var locationCsvPath: String? = null
     private var trackKmlPath: String? = null
@@ -223,6 +226,7 @@ class GnssLoggerService : Service() {
         csvPath = paths.satelliteCsvAbsolutePath
         rawCsvPath = if (recordRawMeasurements) paths.rawCsvAbsolutePath else null
         nmeaCsvPath = if (recordNmea) paths.nmeaCsvAbsolutePath else null
+        nmeaTextPath = if (recordNmea) paths.nmeaTextAbsolutePath else null
         locationCsvPath = paths.locationCsvAbsolutePath
         trackKmlPath = paths.trackKmlAbsolutePath
         sessionDirectoryPath = paths.directoryAbsolutePath
@@ -279,6 +283,7 @@ class GnssLoggerService : Service() {
                 csvPath = csvPath,
                 rawCsvPath = rawCsvPath,
                 nmeaCsvPath = nmeaCsvPath,
+                nmeaTextPath = nmeaTextPath,
                 sessionDirectoryPath = sessionDirectoryPath,
                 locationCsvPath = locationCsvPath,
                 trackKmlPath = trackKmlPath,
@@ -389,6 +394,7 @@ class GnssLoggerService : Service() {
                             csvPath = csvPath,
                             rawCsvPath = rawCsvPath,
                             nmeaCsvPath = nmeaCsvPath,
+                            nmeaTextPath = nmeaTextPath,
                             sessionDirectoryPath = sessionDirectoryPath,
                             locationCsvPath = locationCsvPath,
                             trackKmlPath = trackKmlPath,
@@ -675,6 +681,7 @@ class GnssLoggerService : Service() {
                     csvPath = csvPath,
                     rawCsvPath = rawCsvPath,
                     nmeaCsvPath = nmeaCsvPath,
+                    nmeaTextPath = nmeaTextPath,
                     locationCsvPath = locationCsvPath,
                     trackKmlPath = trackKmlPath,
                     sessionDirectoryPath = sessionDirectoryPath,
@@ -730,7 +737,11 @@ class GnssLoggerService : Service() {
             locationCsvLogger = null
         }
 
+        val nmeaMsg = exportStandardNmeaOnStop()
         val kmlMsg = exportTrackKmlOnStop()
+        val stopMessage = listOfNotNull(nmeaMsg, kmlMsg, reason)
+            .joinToString(separator = "\n")
+            .takeIf { it.isNotBlank() }
         recordingPhase = GnssRecordingPhase.STOPPED
 
         _sessionState.update {
@@ -749,7 +760,7 @@ class GnssLoggerService : Service() {
                 hasNmeaRmc = hasNmeaRmc,
                 hasNmeaGsa = hasNmeaGsa,
                 hasNmeaGsv = hasNmeaGsv,
-                lastError = kmlMsg ?: reason,
+                lastError = stopMessage,
                 recordsWritten = recordsWritten.get(),
                 rawRecordsWritten = rawRecordsWritten.get(),
                 nmeaRecordsWritten = nmeaRecordsWritten.get(),
@@ -762,6 +773,7 @@ class GnssLoggerService : Service() {
                 csvPath = csvPath,
                 rawCsvPath = rawCsvPath,
                 nmeaCsvPath = nmeaCsvPath,
+                nmeaTextPath = nmeaTextPath,
                 sessionDirectoryPath = sessionDirectoryPath,
                 locationCsvPath = locationCsvPath,
                 trackKmlPath = trackKmlPath,
@@ -795,6 +807,23 @@ class GnssLoggerService : Service() {
             Log.e(TAG, "Failed to export KML from ${locationFile.absolutePath}", e)
             kmlGenerated = false
             "KML 生成失败: ${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
+    private fun exportStandardNmeaOnStop(): String? {
+        val nmeaCsvFile = nmeaCsvPath?.let { java.io.File(it) } ?: return null
+        val nmeaTextFile = nmeaTextPath?.let { java.io.File(it) } ?: return null
+
+        return try {
+            val result = NmeaExporter.exportFromNmeaCsv(nmeaCsvFile, nmeaTextFile)
+            Log.i(TAG, "Standard NMEA exported: ${result.outputFile.absolutePath} (${result.sentenceCount} sentences)")
+            "standard.nmea 已生成（${result.sentenceCount} 条）：${result.outputFile.absolutePath}"
+        } catch (e: NoValidNmeaSentencesException) {
+            Log.w(TAG, "Skip standard NMEA export: ${e.message}")
+            "standard.nmea：未生成，无有效 NMEA 语句"
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to export standard NMEA from ${nmeaCsvFile.absolutePath}", e)
+            "standard.nmea 生成失败：${e.message ?: e.javaClass.simpleName}"
         }
     }
 

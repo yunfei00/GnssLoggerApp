@@ -26,6 +26,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         csvPath = svc.csvPath,
                         rawCsvPath = svc.rawCsvPath,
                         nmeaCsvPath = svc.nmeaCsvPath,
+                        nmeaTextPath = svc.nmeaTextPath,
                         locationCsvPath = svc.locationCsvPath,
                         trackKmlPath = svc.trackKmlPath,
                         sessionDirectoryPath = svc.sessionDirectoryPath,
