@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
@@ -22,7 +23,9 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.gnsslogger.data.GnssSessionState
 import com.example.gnsslogger.data.LoggingUiStatus
 import com.example.gnsslogger.databinding.ActivityMainBinding
+import com.example.gnsslogger.storage.KmlExporter
 import com.example.gnsslogger.storage.LogFileManager
+import com.example.gnsslogger.storage.NoValidTrackPointsException
 import com.example.gnsslogger.ui.MainViewModel
 import com.example.gnsslogger.ui.SatelliteTableAdapter
 import com.example.gnsslogger.util.PermissionHelper
@@ -270,22 +273,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun shareCurrentCsvFiles() {
-        val csvFiles = listOfNotNull(
-            viewModel.uiState.value.csvPath,
-            viewModel.uiState.value.rawCsvPath,
-            viewModel.uiState.value.nmeaCsvPath,
-            viewModel.uiState.value.locationCsvPath,
-            viewModel.uiState.value.trackKmlPath,
-        ).map(::File)
+        val state = viewModel.uiState.value
+        val kmlFile = ensureTrackKmlForShare(state)
+        val files = (
+            listOfNotNull(
+                state.csvPath,
+                state.rawCsvPath,
+                state.nmeaCsvPath,
+                state.locationCsvPath,
+            ).map(::File) + listOfNotNull(kmlFile)
+            )
             .filter { it.exists() && it.isFile && it.length() > 0L }
+            .distinctBy { it.absolutePath }
 
-        if (csvFiles.isEmpty()) {
+        if (files.isEmpty()) {
             Toast.makeText(this, R.string.toast_no_csv_to_share, Toast.LENGTH_SHORT).show()
             return
         }
 
         val uris = ArrayList<Uri>(
-            csvFiles.map { file ->
+            files.map { file ->
                 FileProvider.getUriForFile(
                     this,
                     "${packageName}.fileprovider",
@@ -296,12 +303,55 @@ class MainActivity : AppCompatActivity() {
         val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
             type = "*/*"
             putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
-            clipData = ClipData.newUri(contentResolver, csvFiles.first().name, uris.first()).apply {
+            clipData = ClipData.newUri(contentResolver, files.first().name, uris.first()).apply {
                 uris.drop(1).forEach { uri -> addItem(ClipData.Item(uri)) }
             }
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         startActivity(Intent.createChooser(intent, getString(R.string.action_share_csv)))
+    }
+
+    private fun ensureTrackKmlForShare(state: GnssSessionState): File? {
+        val locationFile = state.locationCsvPath?.let(::File)
+        val kmlFile = state.trackKmlPath?.let(::File)
+            ?: locationFile?.let(::trackKmlFileForLocationCsv)
+            ?: return null
+
+        if (kmlFile.exists() && kmlFile.isFile && kmlFile.length() > 0L) {
+            return kmlFile
+        }
+        if (locationFile == null || !locationFile.exists() || !locationFile.isFile) {
+            return null
+        }
+
+        return try {
+            KmlExporter.exportFromLocationCsv(locationFile, kmlFile).outputFile
+        } catch (e: NoValidTrackPointsException) {
+            Log.w(TAG, "Cannot export KML: ${e.message}")
+            Toast.makeText(this, R.string.toast_no_valid_location_for_kml, Toast.LENGTH_LONG).show()
+            null
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to export KML from ${locationFile.absolutePath}", e)
+            Toast.makeText(
+                this,
+                getString(R.string.toast_kml_export_failed, e.message ?: e.javaClass.simpleName),
+                Toast.LENGTH_LONG,
+            ).show()
+            null
+        }
+    }
+
+    private fun trackKmlFileForLocationCsv(locationFile: File): File {
+        val kmlName = if (locationFile.name.endsWith("_location.csv")) {
+            locationFile.name.removeSuffix("_location.csv") + "_track.kml"
+        } else {
+            locationFile.nameWithoutExtension + "_track.kml"
+        }
+        return locationFile.parentFile?.let { File(it, kmlName) } ?: File(kmlName)
+    }
+
+    companion object {
+        private const val TAG = "MainActivity"
     }
 
 }

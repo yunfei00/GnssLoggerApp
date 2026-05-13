@@ -13,6 +13,7 @@ import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import androidx.core.content.ContextCompat
 import com.example.gnsslogger.data.GnssSessionState
 import com.example.gnsslogger.data.LoggingUiStatus
@@ -24,6 +25,7 @@ import com.example.gnsslogger.storage.CsvGnssWriter
 import com.example.gnsslogger.storage.KmlExporter
 import com.example.gnsslogger.storage.LocationCsvLogger
 import com.example.gnsslogger.storage.LogFileManager
+import com.example.gnsslogger.storage.NoValidTrackPointsException
 import com.example.gnsslogger.util.DeviceInfo
 import com.example.gnsslogger.util.NotificationHelper
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -303,8 +305,8 @@ class GnssLoggerService : Service() {
                             rawCsvPath = rawCsvPath,
                             nmeaCsvPath = nmeaCsvPath,
                             sessionDirectoryPath = sessionDirectoryPath,
-                locationCsvPath = locationCsvPath,
-                trackKmlPath = trackKmlPath,
+                            locationCsvPath = locationCsvPath,
+                            trackKmlPath = trackKmlPath,
                             )
                     }
                 }
@@ -441,14 +443,7 @@ class GnssLoggerService : Service() {
             locationCsvLogger = null
         }
 
-        val kmlMsg = runCatching {
-            val locationFile = locationCsvPath?.let(::java.io.File)
-            val kmlFile = trackKmlPath?.let(::java.io.File)
-            if (locationFile != null && kmlFile != null) {
-                KmlExporter.exportFromLocationCsv(locationFile, kmlFile)
-                "location.csv 已生成；track.kml 已生成；KML 可导入 Google Earth Pro"
-            } else null
-        }.getOrNull()
+        val kmlMsg = exportTrackKmlOnStop()
 
         _sessionState.update {
             it.copy(
@@ -472,6 +467,23 @@ class GnssLoggerService : Service() {
         stopForegroundStopCompat()
         if (stopService) {
             stopSelf()
+        }
+    }
+
+    private fun exportTrackKmlOnStop(): String? {
+        val locationFile = locationCsvPath?.let { java.io.File(it) }
+        val kmlFile = trackKmlPath?.let { java.io.File(it) }
+        if (locationFile == null || kmlFile == null) return null
+
+        return try {
+            val result = KmlExporter.exportFromLocationCsv(locationFile, kmlFile)
+            "track.kml 已生成（${result.pointCount} 个轨迹点），可导入 Google Earth Pro"
+        } catch (e: NoValidTrackPointsException) {
+            Log.w(TAG, "Skip KML export: ${e.message}")
+            "location.csv 没有有效经纬度数据，未生成 track.kml"
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to export KML from ${locationFile.absolutePath}", e)
+            "KML 生成失败: ${e.message ?: e.javaClass.simpleName}"
         }
     }
 
@@ -513,6 +525,7 @@ class GnssLoggerService : Service() {
     }
 
     companion object {
+        private const val TAG = "GnssLoggerService"
         const val NOTIFICATION_ID = 77001
         const val PREFS = "gnss_logger_prefs"
         const val KEY_PREFIX = "filename_prefix"

@@ -30,7 +30,7 @@
 3. 点击 **开始采集**：出现前台通知后开始写 CSV；可退回桌面或锁屏继续采集。
 4. 采集中可随时修改测试场景标签，后续 CSV 行会写入新的 `scene_name`。
 5. 点击 **停止采集**：关闭写入并结束前台服务；下次开始会生成新的 `session_id` 与新 CSV 文件。
-6. **打开保存目录** 可查看所有会话文件；**导出本次 CSV** 可分享当前会话的 CSV 文件。
+6. **打开保存目录** 可查看所有会话文件；**导出 CSV/KML** 可分享当前会话的 CSV 与 KML 轨迹文件。
 
 CSV 默认目录（与 Android 应用专属外部目录一致）：
 
@@ -79,10 +79,17 @@ adb shell am broadcast -n com.example.gnsslogger/com.example.gnsslogger.GnssComm
 每个会话默认生成：
 
 - `*_satellites.csv`：定位 + 卫星状态。
+- `*_location.csv`：按定位回调记录的经纬度、海拔、速度、精度与时间戳。
 - `*_raw.csv`：Raw GNSS Measurements（开启 Raw 记录时生成）。
 - `*_nmea.csv`：NMEA 原始句子（开启 NMEA 记录时生成）。
+- `*_track.kml`：基于 `*_location.csv` 生成的 Google Earth Pro 轨迹文件。
 
-点击 **导出本次 CSV** 时，会额外自动生成并分享同名 `*.kml` 轨迹文件（基于 `*_satellites.csv` 的经纬高点），可直接导入 Google Earth Pro。
+停止采集时，App 会自动根据 `*_location.csv` 生成同名前缀的 `*_track.kml`。例如：
+
+- `session_20260513_153000_location.csv`
+- `session_20260513_153000_track.kml`
+
+点击 **导出 CSV/KML** 时会同时分享 CSV 与 `*_track.kml`；如果 KML 文件不存在，App 会尝试根据 `*_location.csv` 重新生成。`*_track.kml` 可直接用 Google Earth Pro 打开，导入方式为：**文件 -> 打开 -> 选择 `*_track.kml`**。
 
 ## CSV 字段说明
 
