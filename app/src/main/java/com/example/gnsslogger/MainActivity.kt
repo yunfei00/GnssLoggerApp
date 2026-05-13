@@ -22,6 +22,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.gnsslogger.data.GnssSessionState
 import com.example.gnsslogger.data.LoggingUiStatus
 import com.example.gnsslogger.databinding.ActivityMainBinding
+import com.example.gnsslogger.storage.GoogleEarthKmlExporter
 import com.example.gnsslogger.storage.LogFileManager
 import com.example.gnsslogger.ui.MainViewModel
 import com.example.gnsslogger.ui.SatelliteTableAdapter
@@ -280,20 +281,32 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun shareCurrentCsvFiles() {
-        val files = listOfNotNull(
+        val csvFiles = listOfNotNull(
             viewModel.uiState.value.csvPath,
             viewModel.uiState.value.rawCsvPath,
             viewModel.uiState.value.nmeaCsvPath,
         ).map(::File)
             .filter { it.exists() && it.isFile && it.length() > 0L }
 
-        if (files.isEmpty()) {
+        if (csvFiles.isEmpty()) {
             Toast.makeText(this, R.string.toast_no_csv_to_share, Toast.LENGTH_SHORT).show()
             return
         }
 
+        val filesToShare = csvFiles.toMutableList()
+        val satelliteCsv = csvFiles.firstOrNull()
+        if (satelliteCsv != null) {
+            runCatching {
+                val kmlFile = File(cacheDir, "${satelliteCsv.nameWithoutExtension}.kml")
+                GoogleEarthKmlExporter.exportFromSatelliteCsv(satelliteCsv, kmlFile)
+                if (kmlFile.exists() && kmlFile.length() > 0L) {
+                    filesToShare.add(kmlFile)
+                }
+            }
+        }
+
         val uris = ArrayList<Uri>(
-            files.map { file ->
+            filesToShare.map { file ->
                 FileProvider.getUriForFile(
                     this,
                     "${packageName}.fileprovider",
@@ -302,9 +315,9 @@ class MainActivity : AppCompatActivity() {
             },
         )
         val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-            type = "text/csv"
+            type = "*/*"
             putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
-            clipData = ClipData.newUri(contentResolver, files.first().name, uris.first()).apply {
+            clipData = ClipData.newUri(contentResolver, filesToShare.first().name, uris.first()).apply {
                 uris.drop(1).forEach { uri -> addItem(ClipData.Item(uri)) }
             }
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
