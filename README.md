@@ -82,6 +82,8 @@ adb shell am broadcast -n com.example.gnsslogger/com.example.gnsslogger.GnssComm
 - `*_raw.csv`：Raw GNSS Measurements（开启 Raw 记录时生成）。
 - `*_nmea.csv`：NMEA 原始句子（开启 NMEA 记录时生成）。
 
+点击 **导出本次 CSV** 时，会额外自动生成并分享同名 `*.kml` 轨迹文件（基于 `*_satellites.csv` 的经纬高点），可直接导入 Google Earth Pro。
+
 ## CSV 字段说明
 
 ### `*_satellites.csv`
