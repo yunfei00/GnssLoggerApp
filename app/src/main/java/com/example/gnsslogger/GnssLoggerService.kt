@@ -477,10 +477,10 @@ class GnssLoggerService : Service() {
 
         return try {
             val result = KmlExporter.exportFromLocationCsv(locationFile, kmlFile)
-            "track.kml 已生成（${result.pointCount} 个轨迹点），可导入 Google Earth Pro"
+            "已生成 CSV 和 KML，KML 可导入 Google Earth Pro。track.kml 已生成（${result.pointCount} 个轨迹点）"
         } catch (e: NoValidTrackPointsException) {
             Log.w(TAG, "Skip KML export: ${e.message}")
-            "location.csv 没有有效经纬度数据，未生成 track.kml"
+            "track.kml：未生成，无有效轨迹点"
         } catch (e: Exception) {
             Log.e(TAG, "Failed to export KML from ${locationFile.absolutePath}", e)
             "KML 生成失败: ${e.message ?: e.javaClass.simpleName}"

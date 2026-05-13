@@ -1,11 +1,16 @@
 package com.example.gnsslogger
 
+import android.Manifest
+import android.content.ContentValues
 import android.content.ClipData
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.SystemClock
+import android.provider.MediaStore
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
@@ -24,14 +29,16 @@ import com.example.gnsslogger.data.GnssSessionState
 import com.example.gnsslogger.data.LoggingUiStatus
 import com.example.gnsslogger.databinding.ActivityMainBinding
 import com.example.gnsslogger.storage.KmlExporter
-import com.example.gnsslogger.storage.LogFileManager
 import com.example.gnsslogger.storage.NoValidTrackPointsException
 import com.example.gnsslogger.ui.MainViewModel
 import com.example.gnsslogger.ui.SatelliteTableAdapter
 import com.example.gnsslogger.util.PermissionHelper
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
 
 class MainActivity : AppCompatActivity() {
 
@@ -40,6 +47,7 @@ class MainActivity : AppCompatActivity() {
         AndroidViewModelFactory.getInstance(application)
     }
     private val adapter = SatelliteTableAdapter()
+    private var pendingSaveToDownloads = false
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -55,6 +63,18 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.RequestMultiplePermissions(),
     ) {
         startLoggingService()
+    }
+
+    private val storagePermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted && pendingSaveToDownloads) {
+            pendingSaveToDownloads = false
+            saveCurrentSessionDataToDownloads()
+        } else {
+            pendingSaveToDownloads = false
+            Toast.makeText(this, R.string.toast_storage_permission_required, Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun collectMissingPermissions(): List<String> {
@@ -80,7 +100,6 @@ class MainActivity : AppCompatActivity() {
         binding.recyclerSatellites.isNestedScrollingEnabled = false
 
         loadFormFromPrefs()
-        refreshSaveDirLabel()
 
         binding.buttonStart.setOnClickListener {
             persistUiFromForm()
@@ -92,8 +111,8 @@ class MainActivity : AppCompatActivity() {
             }
             startService(intent)
         }
-        binding.buttonOpenDir.setOnClickListener { openSaveDirectory() }
-        binding.buttonShareCsv.setOnClickListener { shareCurrentCsvFiles() }
+        binding.buttonShareCsv.setOnClickListener { shareCurrentSessionData() }
+        binding.buttonSaveDownloads.setOnClickListener { saveCurrentSessionDataToDownloads() }
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -122,11 +141,6 @@ class MainActivity : AppCompatActivity() {
             recordNmea = binding.switchNmea.isChecked,
             recordRawMeasurements = binding.switchRaw.isChecked,
         )
-    }
-
-    private fun refreshSaveDirLabel() {
-        val dir = LogFileManager(this).gnssRootDir()
-        binding.textSaveDir.text = dir.absolutePath
     }
 
     private fun requestChainOrStart() {
@@ -175,20 +189,21 @@ class MainActivity : AppCompatActivity() {
         binding.textCsvPath.text = buildString {
             append(
                 getString(
-                    R.string.label_csv,
-                    buildList {
-                        add("卫星=${state.csvPath ?: "-"}")
-                        add("Raw=${state.rawCsvPath ?: "-"}")
-                        add("NMEA=${state.nmeaCsvPath ?: "-"}")
-                        add("Location=${state.locationCsvPath ?: "-"}")
-                        add("Track KML=${state.trackKmlPath ?: "-"}")
-                    }.joinToString(separator = "\n"),
+                    R.string.label_file_status,
+                    buildFileStatusLines(state).joinToString(separator = "\n"),
                 ),
             )
             if (state.sessionId != null) {
                 append('\n')
                 append(getString(R.string.label_session, state.sessionId))
             }
+        }
+        val exportStatus = buildExportStatusText(state)
+        if (exportStatus.isNullOrBlank()) {
+            binding.textExportStatus.visibility = View.GONE
+        } else {
+            binding.textExportStatus.visibility = View.VISIBLE
+            binding.textExportStatus.text = exportStatus
         }
         binding.textSatCounts.text = getString(
             R.string.label_counts,
@@ -210,11 +225,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
         binding.textLastUpdate.text = getString(R.string.label_last_update, last)
-        if (state.lastError.isNullOrBlank()) {
+        val errorMessage = state.lastError?.takeUnless(::isExportInfoMessage)
+        if (errorMessage.isNullOrBlank()) {
             binding.textError.visibility = View.GONE
         } else {
             binding.textError.visibility = View.VISIBLE
-            binding.textError.text = state.lastError
+            binding.textError.text = errorMessage
         }
         if (state.satellites.isEmpty()) {
             binding.textSatelliteTableHint.visibility = View.GONE
@@ -228,6 +244,48 @@ class MainActivity : AppCompatActivity() {
         adapter.submit(state.satellites)
         updateSatelliteRecyclerHeight(state.satellites.size)
     }
+
+    private fun buildFileStatusLines(state: GnssSessionState): List<String> = listOf(
+        "location.csv：${generatedStatus(state.locationCsvPath)}",
+        "satellites.csv：${generatedStatus(state.csvPath)}",
+        "track.kml：${trackKmlStatus(state)}",
+    )
+
+    private fun generatedStatus(path: String?): String =
+        if (path?.let(::isGeneratedFile) == true) "已生成" else "未生成"
+
+    private fun trackKmlStatus(state: GnssSessionState): String {
+        if (state.trackKmlPath?.let(::isGeneratedFile) == true) return "已生成"
+        if (hasNoValidTrackPointMessage(state.lastError)) return "未生成，无有效轨迹点"
+        return if (state.status == LoggingUiStatus.STOPPED) "未生成" else "停止采集后生成"
+    }
+
+    private fun buildExportStatusText(state: GnssSessionState): String? {
+        if (state.status != LoggingUiStatus.STOPPED || state.csvPath == null && state.locationCsvPath == null) {
+            return null
+        }
+        return when {
+            state.trackKmlPath?.let(::isGeneratedFile) == true ->
+                "已生成 CSV 和 KML，KML 可导入 Google Earth Pro。"
+
+            hasNoValidTrackPointMessage(state.lastError) ->
+                "已生成 CSV；track.kml：未生成，无有效轨迹点。"
+
+            else -> "已生成 CSV；track.kml 未生成。"
+        }
+    }
+
+    private fun isGeneratedFile(path: String): Boolean =
+        File(path).let { it.exists() && it.isFile && it.length() > 0L }
+
+    private fun hasNoValidTrackPointMessage(message: String?): Boolean =
+        message?.contains("无有效", ignoreCase = true) == true
+
+    private fun isExportInfoMessage(message: String): Boolean =
+        message.startsWith("已生成 CSV") ||
+            message.startsWith("track.kml 已生成") ||
+            message.startsWith("track.kml：未生成") ||
+            message.contains("没有有效经纬度")
 
     /**
      * RecyclerView 放在 [Nested]ScrollView 里且高度为 wrap_content 时，系统常把 RV 测成「约一两行」，
@@ -244,53 +302,80 @@ class MainActivity : AppCompatActivity() {
         binding.recyclerSatellites.layoutParams = lp
     }
 
-    private fun openSaveDirectory() {
-        refreshSaveDirLabel()
-        val dir = LogFileManager(this).gnssRootDir()
-        if (!dir.exists()) dir.mkdirs()
-        val uri = FileProvider.getUriForFile(
-            this,
-            "${packageName}.fileprovider",
-            dir,
-        )
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "resource/folder")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        val alt = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "*/*")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        try {
-            startActivity(Intent.createChooser(intent, getString(R.string.action_open_dir)))
-        } catch (_: Exception) {
+    private fun shareCurrentSessionData() {
+        val state = viewModel.uiState.value
+        if (!canExportFinishedSession(state)) return
+
+        lifecycleScope.launch {
+            val exportFiles = withContext(Dispatchers.IO) { prepareExportFiles(state) }
+            if (exportFiles.files.isEmpty()) {
+                Toast.makeText(this@MainActivity, R.string.toast_no_csv_to_share, Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+
             try {
-                startActivity(Intent.createChooser(alt, getString(R.string.action_open_dir)))
-            } catch (_: Exception) {
-                Toast.makeText(this, R.string.toast_open_dir_failed, Toast.LENGTH_LONG).show()
+                openShareSheet(exportFiles.files)
+                Toast.makeText(this@MainActivity, R.string.toast_share_sheet_opened, Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to open share sheet", e)
+                Toast.makeText(
+                    this@MainActivity,
+                    getString(R.string.toast_share_failed, e.message ?: e.javaClass.simpleName),
+                    Toast.LENGTH_LONG,
+                ).show()
             }
         }
     }
 
-    private fun shareCurrentCsvFiles() {
+    private fun saveCurrentSessionDataToDownloads() {
         val state = viewModel.uiState.value
-        val kmlFile = ensureTrackKmlForShare(state)
-        val files = (
-            listOfNotNull(
-                state.csvPath,
-                state.rawCsvPath,
-                state.nmeaCsvPath,
-                state.locationCsvPath,
-            ).map(::File) + listOfNotNull(kmlFile)
-            )
-            .filter { it.exists() && it.isFile && it.length() > 0L }
-            .distinctBy { it.absolutePath }
+        if (!canExportFinishedSession(state)) return
 
-        if (files.isEmpty()) {
-            Toast.makeText(this, R.string.toast_no_csv_to_share, Toast.LENGTH_SHORT).show()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingSaveToDownloads = true
+            storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
             return
         }
 
+        lifecycleScope.launch {
+            try {
+                val exportFiles = withContext(Dispatchers.IO) { prepareExportFiles(state) }
+                if (exportFiles.files.isEmpty()) {
+                    Toast.makeText(this@MainActivity, R.string.toast_no_csv_to_share, Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+
+                val relativePath = withContext(Dispatchers.IO) {
+                    saveFilesToDownloads(exportFiles.files, exportFiles.sessionName)
+                }
+                Toast.makeText(
+                    this@MainActivity,
+                    getString(R.string.toast_saved_to_downloads, relativePath),
+                    Toast.LENGTH_LONG,
+                ).show()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to save GNSS files to Downloads", e)
+                Toast.makeText(
+                    this@MainActivity,
+                    getString(R.string.toast_save_downloads_failed, e.message ?: e.javaClass.simpleName),
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
+    private fun canExportFinishedSession(state: GnssSessionState): Boolean {
+        if (state.status != LoggingUiStatus.STOPPED) {
+            Toast.makeText(this, R.string.toast_finish_collection_before_export, Toast.LENGTH_SHORT).show()
+            return false
+        }
+        return true
+    }
+
+    private fun openShareSheet(files: List<File>) {
         val uris = ArrayList<Uri>(
             files.map { file ->
                 FileProvider.getUriForFile(
@@ -311,35 +396,84 @@ class MainActivity : AppCompatActivity() {
         startActivity(Intent.createChooser(intent, getString(R.string.action_share_csv)))
     }
 
-    private fun ensureTrackKmlForShare(state: GnssSessionState): File? {
-        val locationFile = state.locationCsvPath?.let(::File)
-        val kmlFile = state.trackKmlPath?.let(::File)
+    private fun prepareExportFiles(state: GnssSessionState): ExportFiles {
+        val locationFile = state.locationCsvPath?.let(::File)?.takeIf(::isShareableFile)
+        val satelliteFile = state.csvPath?.let(::File)?.takeIf(::isShareableFile)
+        val kmlFile = ensureTrackKml(state, locationFile)?.takeIf(::isShareableFile)
+        val files = listOfNotNull(locationFile, satelliteFile, kmlFile).distinctBy { it.absolutePath }
+        return ExportFiles(files = files, sessionName = sessionNameFor(state, files))
+    }
+
+    private fun ensureTrackKml(state: GnssSessionState, locationFile: File?): File? {
+        val existingKmlFile = state.trackKmlPath?.let(::File)
+        if (existingKmlFile?.let(::isShareableFile) == true) return existingKmlFile
+
+        val outputKml = existingKmlFile
             ?: locationFile?.let(::trackKmlFileForLocationCsv)
             ?: return null
-
-        if (kmlFile.exists() && kmlFile.isFile && kmlFile.length() > 0L) {
-            return kmlFile
-        }
-        if (locationFile == null || !locationFile.exists() || !locationFile.isFile) {
-            return null
-        }
+        if (locationFile == null || !locationFile.exists() || !locationFile.isFile) return null
 
         return try {
-            KmlExporter.exportFromLocationCsv(locationFile, kmlFile).outputFile
+            KmlExporter.exportFromLocationCsv(locationFile, outputKml).outputFile
         } catch (e: NoValidTrackPointsException) {
             Log.w(TAG, "Cannot export KML: ${e.message}")
-            Toast.makeText(this, R.string.toast_no_valid_location_for_kml, Toast.LENGTH_LONG).show()
             null
         } catch (e: Exception) {
             Log.e(TAG, "Failed to export KML from ${locationFile.absolutePath}", e)
-            Toast.makeText(
-                this,
-                getString(R.string.toast_kml_export_failed, e.message ?: e.javaClass.simpleName),
-                Toast.LENGTH_LONG,
-            ).show()
             null
         }
     }
+
+    private fun saveFilesToDownloads(files: List<File>, sessionName: String): String {
+        val relativePath = downloadRelativePath(sessionName)
+        files.forEach { file ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                saveFileToDownloadsWithMediaStore(file, relativePath)
+            } else {
+                saveFileToDownloadsLegacy(file, sessionName)
+            }
+        }
+        return relativePath
+    }
+
+    private fun saveFileToDownloadsWithMediaStore(source: File, relativePath: String) {
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, source.name)
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeTypeFor(source))
+            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            ?: throw IOException("无法创建 ${source.name}")
+
+        try {
+            contentResolver.openOutputStream(uri)?.use { output ->
+                source.inputStream().use { input -> input.copyTo(output) }
+            } ?: throw IOException("无法写入 ${source.name}")
+
+            values.clear()
+            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+            contentResolver.update(uri, values, null, null)
+        } catch (e: Exception) {
+            contentResolver.delete(uri, null, null)
+            throw e
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun saveFileToDownloadsLegacy(source: File, sessionName: String) {
+        val dir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            "GnssLogger/$sessionName",
+        )
+        if (!dir.exists() && !dir.mkdirs()) {
+            throw IOException("无法创建目录 ${dir.absolutePath}")
+        }
+        source.copyTo(File(dir, source.name), overwrite = true)
+    }
+
+    private fun downloadRelativePath(sessionName: String): String =
+        "${Environment.DIRECTORY_DOWNLOADS}/GnssLogger/$sessionName/"
 
     private fun trackKmlFileForLocationCsv(locationFile: File): File {
         val kmlName = if (locationFile.name.endsWith("_location.csv")) {
@@ -349,6 +483,44 @@ class MainActivity : AppCompatActivity() {
         }
         return locationFile.parentFile?.let { File(it, kmlName) } ?: File(kmlName)
     }
+
+    private fun isShareableFile(file: File): Boolean =
+        file.exists() && file.isFile && file.length() > 0L
+
+    private fun sessionNameFor(state: GnssSessionState, files: List<File>): String {
+        val fromPath = sequenceOf(state.locationCsvPath, state.csvPath, state.trackKmlPath)
+            .filterNotNull()
+            .map { File(it) }
+            .plus(files.asSequence())
+            .mapNotNull { sessionNameFromFileName(it.name) }
+            .firstOrNull()
+        return sanitizePathSegment(fromPath ?: state.sessionId ?: "session")
+    }
+
+    private fun sessionNameFromFileName(name: String): String? {
+        val suffixes = listOf("_location.csv", "_satellites.csv", "_track.kml")
+        return suffixes.firstNotNullOfOrNull { suffix ->
+            name.takeIf { it.endsWith(suffix) }?.removeSuffix(suffix)
+        }
+    }
+
+    private fun sanitizePathSegment(raw: String): String =
+        raw.trim()
+            .replace(Regex("[^A-Za-z0-9._-]"), "_")
+            .trim('_', '.', '-')
+            .ifBlank { "session" }
+
+    private fun mimeTypeFor(file: File): String =
+        when (file.extension.lowercase()) {
+            "csv" -> "text/csv"
+            "kml" -> "application/vnd.google-earth.kml+xml"
+            else -> "application/octet-stream"
+        }
+
+    private data class ExportFiles(
+        val files: List<File>,
+        val sessionName: String,
+    )
 
     companion object {
         private const val TAG = "MainActivity"

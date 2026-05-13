@@ -32,6 +32,13 @@
             android:textIsSelectable="true" />
 
         <TextView
+            android:id="@+id/textExportStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:visibility="gone" />
+
+        <TextView
             android:id="@+id/textSatCounts"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -74,18 +81,18 @@
         </LinearLayout>
 
         <Button
-            android:id="@+id/buttonOpenDir"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/action_open_dir" />
-
-        <Button
             android:id="@+id/buttonShareCsv"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:text="@string/action_share_csv" />
+
+        <Button
+            android:id="@+id/buttonSaveDownloads"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/action_save_downloads" />
 
         <TextView
             android:layout_width="match_parent"
@@ -93,20 +100,6 @@
             android:paddingTop="16dp"
             android:text="@string/section_config"
             android:textAppearance="?attr/textAppearanceTitleMedium" />
-
-        <TextView
-            android:id="@+id/textSaveDirLabel"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingTop="8dp"
-            android:text="@string/label_save_dir" />
-
-        <TextView
-            android:id="@+id/textSaveDir"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingTop="4dp"
-            android:textIsSelectable="true" />
 
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent"

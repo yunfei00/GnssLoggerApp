@@ -11,7 +11,7 @@
 - `GnssMeasurementsEvent.Callback` 记录 Raw GNSS Measurements。
 - 实时 `flush` 的多 CSV 写入，降低异常退出时的数据丢失。
 - 广播：`ACTION_START_LOGGING` / `ACTION_STOP_LOGGING` / `ACTION_UPDATE_SCENE`。
-- 主界面展示状态、场景、文件路径、卫星表格、写入计数、导出入口与配置项。
+- 主界面展示状态、场景、文件生成状态、卫星表格、写入计数、分享/保存入口与配置项。
 
 ## 权限说明
 
@@ -21,7 +21,7 @@
 | `ACCESS_BACKGROUND_LOCATION` | 长时间后台采集（建议「始终允许」） |
 | `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_LOCATION` | 前台服务（含定位类型，Android 10+） |
 | `POST_NOTIFICATIONS` | 通知栏展示采集状态（Android 13+） |
-| `WRITE_EXTERNAL_STORAGE` | 仅 `maxSdkVersion=28` 声明，兼容极老存储习惯；实际写入以应用专属目录为主 |
+| `WRITE_EXTERNAL_STORAGE` | 仅 `maxSdkVersion=28` 声明，兼容 Android 9 及以下保存到公共下载目录；Android 10+ 通过 MediaStore 保存 |
 
 ## 手动使用
 
@@ -30,7 +30,9 @@
 3. 点击 **开始采集**：出现前台通知后开始写 CSV；可退回桌面或锁屏继续采集。
 4. 采集中可随时修改测试场景标签，后续 CSV 行会写入新的 `scene_name`。
 5. 点击 **停止采集**：关闭写入并结束前台服务；下次开始会生成新的 `session_id` 与新 CSV 文件。
-6. **打开保存目录** 可查看所有会话文件；**导出 CSV/KML** 可分享当前会话的 CSV 与 KML 轨迹文件。
+6. 停止采集后会生成 CSV 和 KML，并在界面显示 `location.csv`、`satellites.csv`、`track.kml` 的生成状态。
+7. 点击 **分享本次数据** 可通过系统分享面板把本次 `*_location.csv`、`*_satellites.csv`、`*_track.kml` 发送到电脑或其它应用。
+8. 点击 **保存到下载目录** 可将本次文件复制到 `Download/GnssLogger/<session_name>/`。
 
 CSV 默认目录（与 Android 应用专属外部目录一致）：
 
@@ -89,7 +91,11 @@ adb shell am broadcast -n com.example.gnsslogger/com.example.gnsslogger.GnssComm
 - `session_20260513_153000_location.csv`
 - `session_20260513_153000_track.kml`
 
-点击 **导出 CSV/KML** 时会同时分享 CSV 与 `*_track.kml`；如果 KML 文件不存在，App 会尝试根据 `*_location.csv` 重新生成。`*_track.kml` 可直接用 Google Earth Pro 打开，导入方式为：**文件 -> 打开 -> 选择 `*_track.kml`**。
+停止采集后，App 会提示 CSV 和 KML 的生成结果。点击 **分享本次数据** 时会分享本次 `*_location.csv`、`*_satellites.csv` 与 `*_track.kml`；如果 KML 文件不存在，App 会尝试根据 `*_location.csv` 重新生成。点击 **保存到下载目录** 时会把这些文件复制到：
+
+`Download/GnssLogger/<session_name>/`
+
+`*_track.kml` 可直接用 Google Earth Pro 打开，导入方式为：**文件 -> 打开 -> 选择 `*_track.kml`**。
 
 ## CSV 字段说明
 
@@ -123,7 +129,7 @@ adb shell am broadcast -n com.example.gnsslogger/com.example.gnsslogger.GnssComm
 2. 首次建议通过 UI 完成权限授权；无人值守可在支持设备上使用 `adb shell pm grant` 授予运行时权限（视 ROM 策略而定）。
 3. 用 **开始/停止** 广播控制采集生命周期；在切换用例时发送 **更新场景** 广播，后续 CSV 行中的 `scene_name` 即切换为新值。
 4. 拉取 `Android/data/com.example.gnsslogger/files/gnss/` 下 CSV 与自动化框架对齐时间轴与用例 ID。
-5. 也可以通过 App 内 **导出本次 CSV** 分享当前会话文件。
+5. 也可以通过 App 内 **分享本次数据** 或 **保存到下载目录** 导出当前会话文件。
 
 ## CI 与发布
 
