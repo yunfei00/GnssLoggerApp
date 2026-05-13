@@ -18,6 +18,8 @@ import com.example.gnsslogger.data.GnssSessionState
 import com.example.gnsslogger.data.LoggingUiStatus
 import com.example.gnsslogger.gnss.GnssCollector
 import com.example.gnsslogger.gnss.GnssStatusFrame
+import com.example.gnsslogger.gnss.NmeaMessageFrame
+import com.example.gnsslogger.gnss.RawGnssMeasurementsFrame
 import com.example.gnsslogger.storage.CsvGnssWriter
 import com.example.gnsslogger.storage.LogFileManager
 import com.example.gnsslogger.util.DeviceInfo
@@ -27,6 +29,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
@@ -38,16 +41,39 @@ class GnssLoggerService : Service() {
     private var csvWriter: CsvGnssWriter? = null
     private var sessionId: String? = null
     private var csvPath: String? = null
+    private var rawCsvPath: String? = null
+    private var nmeaCsvPath: String? = null
+    private var sessionDirectoryPath: String? = null
     private var csvFileName: String? = null
     private var provisionalForeground = false
+    private var recordNmea = true
+    private var recordRawMeasurements = true
 
-    private val csvExecutor = Executors.newSingleThreadExecutor { r ->
-        Thread(r, "gnss-csv-writer").apply { isDaemon = true }
-    }
+    private var csvExecutor = newCsvExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val recordsWritten = AtomicLong(0L)
+    private val rawRecordsWritten = AtomicLong(0L)
+    private val nmeaRecordsWritten = AtomicLong(0L)
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun newCsvExecutor() = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "gnss-csv-writer").apply { isDaemon = true }
+    }
+
+    private fun ensureCsvExecutor() {
+        if (csvExecutor.isShutdown || csvExecutor.isTerminated) {
+            csvExecutor = newCsvExecutor()
+        }
+    }
+
+    private fun enqueueCsvWrite(block: () -> Unit) {
+        if (csvExecutor.isShutdown || csvExecutor.isTerminated) return
+        try {
+            csvExecutor.execute(block)
+        } catch (_: RejectedExecutionException) {
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -173,15 +199,23 @@ class GnssLoggerService : Service() {
 
     @SuppressLint("MissingPermission")
     private fun startLoggingInternal() {
+        ensureCsvExecutor()
         val prefix = readFilenamePrefix(this)
         val useDate = readUseDateSubdir(this)
+        recordNmea = readRecordNmea(this)
+        recordRawMeasurements = readRecordRawMeasurements(this)
         val paths = LogFileManager(this).createNewSession(prefix, useDate)
         sessionId = paths.sessionId
-        csvPath = paths.csvAbsolutePath
-        csvFileName = paths.csvFileName
+        csvPath = paths.satelliteCsvAbsolutePath
+        rawCsvPath = if (recordRawMeasurements) paths.rawCsvAbsolutePath else null
+        nmeaCsvPath = if (recordNmea) paths.nmeaCsvAbsolutePath else null
+        sessionDirectoryPath = paths.directoryAbsolutePath
+        csvFileName = paths.satelliteCsvFileName
 
         val writer = CsvGnssWriter(
-            file = java.io.File(paths.csvAbsolutePath),
+            satelliteFile = java.io.File(paths.satelliteCsvAbsolutePath),
+            rawMeasurementsFile = rawCsvPath?.let { java.io.File(it) },
+            nmeaFile = nmeaCsvPath?.let { java.io.File(it) },
             deviceModel = DeviceInfo.model(),
             androidVersion = DeviceInfo.androidRelease(),
             packageVersion = DeviceInfo.packageVersionName(this),
@@ -191,15 +225,23 @@ class GnssLoggerService : Service() {
 
         val thread = HandlerThread("gnss-callbacks").apply { start() }
         gnssThread = thread
-        val collectorInstance = GnssCollector(this, thread.looper) { frame ->
-            onGnssFrame(frame)
-        }
+        val collectorInstance = GnssCollector(
+            context = this,
+            callbackLooper = thread.looper,
+            collectNmea = recordNmea,
+            collectRawMeasurements = recordRawMeasurements,
+            onStatusFrame = { frame -> onGnssFrame(frame) },
+            onNmeaMessage = { frame -> onNmeaFrame(frame) },
+            onRawMeasurements = { frame -> onRawMeasurementsFrame(frame) },
+        )
         collector = collectorInstance
         collectorInstance.start()
 
         isLogging = true
         provisionalForeground = false
         recordsWritten.set(0L)
+        rawRecordsWritten.set(0L)
+        nmeaRecordsWritten.set(0L)
         lastNotifiedRecords = 0L
         val notification = NotificationHelper.buildForegroundNotification(
             this,
@@ -214,8 +256,13 @@ class GnssLoggerService : Service() {
                 status = LoggingUiStatus.LOGGING,
                 sessionId = sessionId,
                 csvPath = csvPath,
+                rawCsvPath = rawCsvPath,
+                nmeaCsvPath = nmeaCsvPath,
+                sessionDirectoryPath = sessionDirectoryPath,
                 sceneName = currentSceneName(),
                 recordsWritten = 0L,
+                rawRecordsWritten = 0L,
+                nmeaRecordsWritten = 0L,
                 lastError = null,
                 gpsEnabled = true,
             )
@@ -230,7 +277,7 @@ class GnssLoggerService : Service() {
         val scene = currentSceneName()
         val loc = collector?.lastLocation
 
-        csvExecutor.execute {
+        enqueueCsvWrite {
             try {
                 val lines = if (frame.satellites.isEmpty()) {
                     0L
@@ -247,8 +294,8 @@ class GnssLoggerService : Service() {
                     )
                 }
                 if (lines > 0) {
-                    val total = recordsWritten.addAndGet(lines)
-                    maybeRefreshNotification(total)
+                    recordsWritten.addAndGet(lines)
+                    maybeRefreshNotification(totalRecordsWritten())
                 }
                 mainHandler.post {
                     _sessionState.update { prev ->
@@ -258,7 +305,12 @@ class GnssLoggerService : Service() {
                             satellites = frame.satellites,
                             lastUpdateElapsedRealtimeMs = SystemClock.elapsedRealtime(),
                             recordsWritten = recordsWritten.get(),
+                            rawRecordsWritten = rawRecordsWritten.get(),
+                            nmeaRecordsWritten = nmeaRecordsWritten.get(),
                             csvPath = csvPath,
+                            rawCsvPath = rawCsvPath,
+                            nmeaCsvPath = nmeaCsvPath,
+                            sessionDirectoryPath = sessionDirectoryPath,
                             sceneName = scene,
                         )
                     }
@@ -271,7 +323,88 @@ class GnssLoggerService : Service() {
         }
     }
 
+    private fun onRawMeasurementsFrame(frame: RawGnssMeasurementsFrame) {
+        val writer = csvWriter ?: return
+        val sid = sessionId ?: return
+        if (frame.measurements.isEmpty()) return
+        val ts = System.currentTimeMillis()
+        val elapsedNanos = SystemClock.elapsedRealtimeNanos()
+        val scene = currentSceneName()
+
+        enqueueCsvWrite {
+            try {
+                val lines = writer.writeRawMeasurementsFrame(
+                    timestampMs = ts,
+                    elapsedRealtimeNanos = elapsedNanos,
+                    sessionId = sid,
+                    sceneName = scene,
+                    frame = frame,
+                )
+                if (lines > 0) {
+                    rawRecordsWritten.addAndGet(lines)
+                    maybeRefreshNotification(totalRecordsWritten())
+                }
+                postWriteStats(scene)
+            } catch (e: Exception) {
+                mainHandler.post {
+                    publishError("写入 Raw GNSS CSV 失败: ${e.message}")
+                }
+            }
+        }
+    }
+
+    private fun onNmeaFrame(frame: NmeaMessageFrame) {
+        val writer = csvWriter ?: return
+        val sid = sessionId ?: return
+        val ts = System.currentTimeMillis()
+        val elapsedNanos = SystemClock.elapsedRealtimeNanos()
+        val scene = currentSceneName()
+
+        enqueueCsvWrite {
+            try {
+                val lines = writer.writeNmeaMessage(
+                    timestampMs = ts,
+                    elapsedRealtimeNanos = elapsedNanos,
+                    sessionId = sid,
+                    sceneName = scene,
+                    nmeaTimestampMs = frame.nmeaTimestampMs,
+                    message = frame.message,
+                )
+                if (lines > 0) {
+                    nmeaRecordsWritten.addAndGet(lines)
+                    maybeRefreshNotification(totalRecordsWritten())
+                }
+                postWriteStats(scene)
+            } catch (e: Exception) {
+                mainHandler.post {
+                    publishError("写入 NMEA CSV 失败: ${e.message}")
+                }
+            }
+        }
+    }
+
+    private fun postWriteStats(scene: String) {
+        mainHandler.post {
+            _sessionState.update { prev ->
+                prev.copy(
+                    lastUpdateElapsedRealtimeMs = SystemClock.elapsedRealtime(),
+                    recordsWritten = recordsWritten.get(),
+                    rawRecordsWritten = rawRecordsWritten.get(),
+                    nmeaRecordsWritten = nmeaRecordsWritten.get(),
+                    csvPath = csvPath,
+                    rawCsvPath = rawCsvPath,
+                    nmeaCsvPath = nmeaCsvPath,
+                    sessionDirectoryPath = sessionDirectoryPath,
+                    sceneName = scene,
+                )
+            }
+        }
+    }
+
     private var lastNotifiedRecords = 0L
+    private fun totalRecordsWritten(): Long =
+        recordsWritten.get() + rawRecordsWritten.get() + nmeaRecordsWritten.get()
+
     private fun maybeRefreshNotification(total: Long) {
         if (total <= 0L) return
         if (lastNotifiedRecords != 0L && total - lastNotifiedRecords < 25) return
@@ -311,6 +444,13 @@ class GnssLoggerService : Service() {
                 visibleSatelliteCount = 0,
                 usedInFixCount = 0,
                 lastError = reason,
+                recordsWritten = recordsWritten.get(),
+                rawRecordsWritten = rawRecordsWritten.get(),
+                nmeaRecordsWritten = nmeaRecordsWritten.get(),
+                csvPath = csvPath,
+                rawCsvPath = rawCsvPath,
+                nmeaCsvPath = nmeaCsvPath,
+                sessionDirectoryPath = sessionDirectoryPath,
             )
         }
         provisionalForeground = false
@@ -348,7 +488,7 @@ class GnssLoggerService : Service() {
             this,
             currentSceneName(),
             csvFileName,
-            recordsWritten.get(),
+            totalRecordsWritten(),
         )
         val mgr = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
         mgr.notify(NOTIFICATION_ID, notification)
@@ -365,6 +505,7 @@ class GnssLoggerService : Service() {
         const val KEY_PREFIX = "filename_prefix"
         const val KEY_DATE_SUBDIR = "use_date_subdir"
         const val KEY_NMEA = "record_nmea"
+        const val KEY_RAW_MEASUREMENTS = "record_raw_measurements"
 
         private val sceneLock = Any()
         private var currentSceneNameInternal: String = "unknown_scene"
@@ -400,17 +541,27 @@ class GnssLoggerService : Service() {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getBoolean(KEY_DATE_SUBDIR, true)
 
+        fun readRecordNmea(context: Context): Boolean =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(KEY_NMEA, true)
+
+        fun readRecordRawMeasurements(context: Context): Boolean =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(KEY_RAW_MEASUREMENTS, true)
+
         fun writeUiPrefs(
             context: Context,
             prefix: String,
             useDateSubdir: Boolean,
             recordNmea: Boolean,
+            recordRawMeasurements: Boolean,
         ) {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit()
                 .putString(KEY_PREFIX, prefix.ifBlank { "gnss_log" })
                 .putBoolean(KEY_DATE_SUBDIR, useDateSubdir)
                 .putBoolean(KEY_NMEA, recordNmea)
+                .putBoolean(KEY_RAW_MEASUREMENTS, recordRawMeasurements)
                 .apply()
         }
     }

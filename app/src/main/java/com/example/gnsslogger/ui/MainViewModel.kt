@@ -24,12 +24,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         status = svc.status,
                         sceneName = svc.sceneName,
                         csvPath = svc.csvPath,
+                        rawCsvPath = svc.rawCsvPath,
+                        nmeaCsvPath = svc.nmeaCsvPath,
+                        sessionDirectoryPath = svc.sessionDirectoryPath,
                         visibleSatelliteCount = svc.visibleSatelliteCount,
                         usedInFixCount = svc.usedInFixCount,
                         lastUpdateElapsedRealtimeMs = svc.lastUpdateElapsedRealtimeMs,
                         satellites = svc.satellites,
                         sessionId = svc.sessionId,
                         recordsWritten = svc.recordsWritten,
+                        rawRecordsWritten = svc.rawRecordsWritten,
+                        nmeaRecordsWritten = svc.nmeaRecordsWritten,
                         lastError = svc.lastError,
                         gpsEnabled = svc.gpsEnabled,
                     )
@@ -38,7 +43,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun persistUiPrefs(prefix: String, useDateSubdir: Boolean, recordNmea: Boolean) {
-        GnssLoggerService.writeUiPrefs(getApplication(), prefix, useDateSubdir, recordNmea)
+    fun persistUiPrefs(
+        prefix: String,
+        useDateSubdir: Boolean,
+        recordNmea: Boolean,
+        recordRawMeasurements: Boolean,
+    ) {
+        GnssLoggerService.writeUiPrefs(
+            context = getApplication(),
+            prefix = prefix,
+            useDateSubdir = useDateSubdir,
+            recordNmea = recordNmea,
+            recordRawMeasurements = recordRawMeasurements,
+        )
     }
 }

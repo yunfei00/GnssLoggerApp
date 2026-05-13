@@ -1,10 +1,15 @@
 package com.example.gnsslogger.gnss
 
+import android.annotation.SuppressLint
 import android.content.Context
+import android.location.GnssClock
+import android.location.GnssMeasurement
+import android.location.GnssMeasurementsEvent
 import android.location.GnssStatus
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.location.OnNmeaMessageListener
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -16,10 +21,24 @@ data class GnssStatusFrame(
     val usedInFixCount: Int,
 )
 
+data class NmeaMessageFrame(
+    val nmeaTimestampMs: Long,
+    val message: String,
+)
+
+data class RawGnssMeasurementsFrame(
+    val clock: GnssClock,
+    val measurements: List<GnssMeasurement>,
+)
+
 class GnssCollector(
     private val context: Context,
     private val callbackLooper: Looper,
-    private val onFrame: (GnssStatusFrame) -> Unit,
+    private val collectNmea: Boolean,
+    private val collectRawMeasurements: Boolean,
+    private val onStatusFrame: (GnssStatusFrame) -> Unit,
+    private val onNmeaMessage: (NmeaMessageFrame) -> Unit,
+    private val onRawMeasurements: (RawGnssMeasurementsFrame) -> Unit,
 ) {
     private val appContext = context.applicationContext
     private val locationManager =
@@ -28,7 +47,22 @@ class GnssCollector(
 
     private val gnssCallback = object : GnssStatus.Callback() {
         override fun onSatelliteStatusChanged(status: GnssStatus) {
-            onFrame(buildFrame(status))
+            onStatusFrame(buildFrame(status))
+        }
+    }
+
+    private val nmeaListener = OnNmeaMessageListener { message, timestamp ->
+        onNmeaMessage(NmeaMessageFrame(timestamp, message))
+    }
+
+    private val rawMeasurementsCallback = object : GnssMeasurementsEvent.Callback() {
+        override fun onGnssMeasurementsReceived(eventArgs: GnssMeasurementsEvent) {
+            onRawMeasurements(
+                RawGnssMeasurementsFrame(
+                    clock = eventArgs.clock,
+                    measurements = eventArgs.measurements.toList(),
+                ),
+            )
         }
     }
 
@@ -40,6 +74,7 @@ class GnssCollector(
     var lastLocation: Location? = null
         private set
 
+    @SuppressLint("MissingPermission")
     fun start() {
         lastLocation = try {
             locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
@@ -61,6 +96,18 @@ class GnssCollector(
             )
         } catch (_: SecurityException) {
         }
+        if (collectNmea) {
+            try {
+                locationManager.addNmeaListener(nmeaListener, callbackHandler)
+            } catch (_: Exception) {
+            }
+        }
+        if (collectRawMeasurements) {
+            try {
+                locationManager.registerGnssMeasurementsCallback(rawMeasurementsCallback, callbackHandler)
+            } catch (_: Exception) {
+            }
+        }
     }
 
     fun stop() {
@@ -70,6 +117,14 @@ class GnssCollector(
         }
         try {
             locationManager.removeUpdates(locationListener)
+        } catch (_: Exception) {
+        }
+        try {
+            locationManager.removeNmeaListener(nmeaListener)
+        } catch (_: Exception) {
+        }
+        try {
+            locationManager.unregisterGnssMeasurementsCallback(rawMeasurementsCallback)
         } catch (_: Exception) {
         }
     }

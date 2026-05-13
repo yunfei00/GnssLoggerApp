@@ -1,6 +1,8 @@
 package com.example.gnsslogger
 
+import android.content.ClipData
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -26,6 +28,7 @@ import com.example.gnsslogger.ui.SatelliteTableAdapter
 import com.example.gnsslogger.util.PermissionHelper
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.launch
+import java.io.File
 
 class MainActivity : AppCompatActivity() {
 
@@ -87,7 +90,8 @@ class MainActivity : AppCompatActivity() {
             startService(intent)
         }
         binding.buttonOpenDir.setOnClickListener { openSaveDirectory() }
-        binding.buttonTestScene.setOnClickListener { sendTestSceneBroadcast() }
+        binding.buttonShareCsv.setOnClickListener { shareCurrentCsvFiles() }
+        binding.buttonUpdateScene.setOnClickListener { updateSceneFromForm() }
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -103,8 +107,12 @@ class MainActivity : AppCompatActivity() {
         binding.inputPrefix.setText(
             p.getString(GnssLoggerService.KEY_PREFIX, "gnss_log") ?: "gnss_log",
         )
+        binding.inputScene.setText(
+            p.getString(GnssLoggerService.KEY_SCENE, "unknown_scene") ?: "unknown_scene",
+        )
         binding.switchDateSubdir.isChecked = p.getBoolean(GnssLoggerService.KEY_DATE_SUBDIR, true)
-        binding.switchNmea.isChecked = p.getBoolean(GnssLoggerService.KEY_NMEA, false)
+        binding.switchNmea.isChecked = p.getBoolean(GnssLoggerService.KEY_NMEA, true)
+        binding.switchRaw.isChecked = p.getBoolean(GnssLoggerService.KEY_RAW_MEASUREMENTS, true)
     }
 
     private fun persistUiFromForm() {
@@ -113,6 +121,11 @@ class MainActivity : AppCompatActivity() {
             prefix = prefix,
             useDateSubdir = binding.switchDateSubdir.isChecked,
             recordNmea = binding.switchNmea.isChecked,
+            recordRawMeasurements = binding.switchRaw.isChecked,
+        )
+        GnssLoggerService.updateSceneName(
+            applicationContext,
+            binding.inputScene.text?.toString()?.trim(),
         )
     }
 
@@ -165,8 +178,20 @@ class MainActivity : AppCompatActivity() {
             LoggingUiStatus.STOPPED -> getString(R.string.status_stopped)
         }
         binding.textScene.text = getString(R.string.label_scene, state.sceneName)
+        if (!binding.inputScene.hasFocus()) {
+            binding.inputScene.setText(state.sceneName)
+        }
         binding.textCsvPath.text = buildString {
-            append(getString(R.string.label_csv, state.csvPath ?: "-"))
+            append(
+                getString(
+                    R.string.label_csv,
+                    buildList {
+                        add("卫星=${state.csvPath ?: "-"}")
+                        add("Raw=${state.rawCsvPath ?: "-"}")
+                        add("NMEA=${state.nmeaCsvPath ?: "-"}")
+                    }.joinToString(separator = "\n"),
+                ),
+            )
             if (state.sessionId != null) {
                 append('\n')
                 append(getString(R.string.label_session, state.sessionId))
@@ -177,6 +202,8 @@ class MainActivity : AppCompatActivity() {
             state.visibleSatelliteCount,
             state.usedInFixCount,
             state.recordsWritten,
+            state.rawRecordsWritten,
+            state.nmeaRecordsWritten,
         )
         val last = when {
             state.lastUpdateElapsedRealtimeMs <= 0L -> "--"
@@ -252,11 +279,41 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun sendTestSceneBroadcast() {
-        val intent = Intent(this, GnssCommandReceiver::class.java).apply {
-            action = AppActions.ACTION_UPDATE_SCENE
-            putExtra(AppActions.EXTRA_SCENE_NAME, "manual_ui_test_scene")
+    private fun shareCurrentCsvFiles() {
+        val files = listOfNotNull(
+            viewModel.uiState.value.csvPath,
+            viewModel.uiState.value.rawCsvPath,
+            viewModel.uiState.value.nmeaCsvPath,
+        ).map(::File)
+            .filter { it.exists() && it.isFile && it.length() > 0L }
+
+        if (files.isEmpty()) {
+            Toast.makeText(this, R.string.toast_no_csv_to_share, Toast.LENGTH_SHORT).show()
+            return
         }
-        sendBroadcast(intent)
+
+        val uris = ArrayList<Uri>(
+            files.map { file ->
+                FileProvider.getUriForFile(
+                    this,
+                    "${packageName}.fileprovider",
+                    file,
+                )
+            },
+        )
+        val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+            type = "text/csv"
+            putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+            clipData = ClipData.newUri(contentResolver, files.first().name, uris.first()).apply {
+                uris.drop(1).forEach { uri -> addItem(ClipData.Item(uri)) }
+            }
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(intent, getString(R.string.action_share_csv)))
+    }
+
+    private fun updateSceneFromForm() {
+        val scene = binding.inputScene.text?.toString()?.trim()
+        GnssLoggerService.updateSceneName(applicationContext, scene)
     }
 }

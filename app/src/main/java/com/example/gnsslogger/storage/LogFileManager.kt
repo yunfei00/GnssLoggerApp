@@ -9,10 +9,20 @@ import java.util.UUID
 
 data class SessionPaths(
     val sessionId: String,
-    val csvAbsolutePath: String,
+    val satelliteCsvAbsolutePath: String,
+    val rawCsvAbsolutePath: String,
+    val nmeaCsvAbsolutePath: String,
     val directoryAbsolutePath: String,
-    val csvFileName: String,
-)
+    val satelliteCsvFileName: String,
+    val rawCsvFileName: String,
+    val nmeaCsvFileName: String,
+) {
+    val csvAbsolutePath: String
+        get() = satelliteCsvAbsolutePath
+
+    val csvFileName: String
+        get() = satelliteCsvFileName
+}
 
 class LogFileManager(private val context: Context) {
 
@@ -29,13 +39,19 @@ class LogFileManager(private val context: Context) {
         if (!dir.exists() && !dir.mkdirs()) {
             throw IllegalStateException("无法创建目录: ${dir.absolutePath}")
         }
-        val safePrefix = filenamePrefix.ifBlank { "gnss_log" }
-        val csvFile = File(dir, "${safePrefix}_$ymdhms.csv")
+        val safePrefix = sanitizeFilenamePrefix(filenamePrefix)
+        val satelliteCsvFile = File(dir, "${safePrefix}_${ymdhms}_satellites.csv")
+        val rawCsvFile = File(dir, "${safePrefix}_${ymdhms}_raw.csv")
+        val nmeaCsvFile = File(dir, "${safePrefix}_${ymdhms}_nmea.csv")
         return SessionPaths(
             sessionId = sessionId,
-            csvAbsolutePath = csvFile.absolutePath,
+            satelliteCsvAbsolutePath = satelliteCsvFile.absolutePath,
+            rawCsvAbsolutePath = rawCsvFile.absolutePath,
+            nmeaCsvAbsolutePath = nmeaCsvFile.absolutePath,
             directoryAbsolutePath = dir.absolutePath,
-            csvFileName = csvFile.name,
+            satelliteCsvFileName = satelliteCsvFile.name,
+            rawCsvFileName = rawCsvFile.name,
+            nmeaCsvFileName = nmeaCsvFile.name,
         )
     }
 
@@ -44,5 +60,13 @@ class LogFileManager(private val context: Context) {
     private fun resolveGnssRootDir(): File {
         context.getExternalFilesDir("gnss")?.let { return it }
         return File(context.filesDir, "gnss").apply { mkdirs() }
+    }
+
+    private fun sanitizeFilenamePrefix(filenamePrefix: String): String {
+        val cleaned = filenamePrefix
+            .trim()
+            .replace(Regex("[^A-Za-z0-9._-]"), "_")
+            .trim('_', '.', '-')
+        return cleaned.ifBlank { "gnss_log" }
     }
 }

@@ -1,14 +1,17 @@
 # GNSS Data Logger
 
-面向自动化长时间测试的 Android GNSS 数据采集应用。应用在后台通过前台服务持续监听 `GnssStatus` 与位置更新，将每一帧卫星状态实时写入 CSV（每行一颗卫星），并支持通过 **adb broadcast** 或应用内广播更新当前测试场景名称。
+面向自动化长时间测试的 Android GNSS 数据采集应用。应用在后台通过前台服务持续监听位置、`GnssStatus`、NMEA 与 Raw GNSS Measurements，将每个采集会话写入多份 CSV，并支持通过 UI、**adb broadcast** 或应用内广播更新当前测试场景名称。
 
 ## 功能概述
 
 - 前台服务（`location` 类型）保障后台采集。
-- `LocationManager` + `GnssStatus.Callback` + `LocationListener` 获取卫星与定位信息。
-- 实时 `flush` 的 CSV 写入，降低异常退出时的数据丢失。
+- `LocationManager` + `LocationListener` 获取经纬度、海拔、精度、速度与方位。
+- `GnssStatus.Callback` 获取可见卫星、参与定位卫星、星座、SVID、C/N0、方位角、仰角等。
+- `OnNmeaMessageListener` 记录原始 NMEA 句子。
+- `GnssMeasurementsEvent.Callback` 记录 Raw GNSS Measurements。
+- 实时 `flush` 的多 CSV 写入，降低异常退出时的数据丢失。
 - 广播：`ACTION_START_LOGGING` / `ACTION_STOP_LOGGING` / `ACTION_UPDATE_SCENE`。
-- 主界面展示状态、场景、文件路径、卫星表格与配置项。
+- 主界面展示状态、场景、文件路径、卫星表格、写入计数、导出入口与配置项。
 
 ## 权限说明
 
@@ -23,10 +26,11 @@
 ## 手动使用
 
 1. 安装 APK 后打开应用，授予通知（若系统要求）、定位及（建议）后台定位。
-2. 设置文件名前缀、是否按日期建子目录；「记录 NMEA」为预留开关，当前版本不采集 NMEA。
+2. 设置文件名前缀、测试场景标签、是否按日期建子目录，以及是否记录 NMEA / Raw GNSS。
 3. 点击 **开始采集**：出现前台通知后开始写 CSV；可退回桌面或锁屏继续采集。
-4. 点击 **停止采集**：关闭写入并结束前台服务；下次开始会生成新的 `session_id` 与新 CSV 文件。
-5. **打开保存目录**：尝试调起文件管理器；若失败，路径仍显示在界面中。
+4. 采集中可随时修改测试场景标签，后续 CSV 行会写入新的 `scene_name`。
+5. 点击 **停止采集**：关闭写入并结束前台服务；下次开始会生成新的 `session_id` 与新 CSV 文件。
+6. **打开保存目录** 可查看所有会话文件；**导出本次 CSV** 可分享当前会话的 CSV 文件。
 
 CSV 默认目录（与 Android 应用专属外部目录一致）：
 
@@ -72,9 +76,15 @@ adb shell am broadcast -n com.example.gnsslogger/com.example.gnsslogger.GnssComm
 
 `scene_name` 为空或缺失时，应用会写入 `unknown_scene`。
 
+每个会话默认生成：
+
+- `*_satellites.csv`：定位 + 卫星状态。
+- `*_raw.csv`：Raw GNSS Measurements（开启 Raw 记录时生成）。
+- `*_nmea.csv`：NMEA 原始句子（开启 NMEA 记录时生成）。
+
 ## CSV 字段说明
 
-表头固定为：
+### `*_satellites.csv`
 
 `timestamp_ms,timestamp_iso,elapsed_realtime_nanos,device_model,android_version,package_version,session_id,scene_name,provider,latitude,longitude,altitude,accuracy,speed,bearing,satellite_count,used_in_fix_count,constellation_type,constellation_name,svid,cn0_dbhz,elevation_deg,azimuth_deg,used_in_fix,carrier_frequency_hz,baseband_cn0_dbhz,has_almanac,has_ephemeris`
 
@@ -84,12 +94,27 @@ adb shell am broadcast -n com.example.gnsslogger/com.example.gnsslogger.GnssComm
 - `carrier_frequency_hz`：Android 8+（API 26）起在硬件支持时填写。
 - `baseband_cn0_dbhz`：Android 11（API 30）起在支持时填写。
 
+### `*_raw.csv`
+
+`timestamp_ms,timestamp_iso,elapsed_realtime_nanos,device_model,android_version,package_version,session_id,scene_name,clock_time_nanos,clock_full_bias_nanos,clock_bias_nanos,clock_bias_uncertainty_nanos,clock_drift_nanos_per_second,clock_drift_uncertainty_nanos_per_second,hardware_clock_discontinuity_count,constellation_type,constellation_name,svid,time_offset_nanos,state,received_sv_time_nanos,received_sv_time_uncertainty_nanos,cn0_dbhz,pseudorange_rate_mps,pseudorange_rate_uncertainty_mps,accumulated_delta_range_state,accumulated_delta_range_m,accumulated_delta_range_uncertainty_m,carrier_frequency_hz,baseband_cn0_dbhz,automatic_gain_control_db,snr_db,multipath_indicator`
+
+- 同一帧 Raw GNSS 回调内所有 measurement 共享相同的 `clock_*` 字段。
+- 设备或芯片不支持的字段为空。
+
+### `*_nmea.csv`
+
+`timestamp_ms,timestamp_iso,elapsed_realtime_nanos,device_model,android_version,package_version,session_id,scene_name,nmea_timestamp_ms,message`
+
+- `message` 保留原始 NMEA 句子内容。
+- `nmea_timestamp_ms` 来自 Android NMEA 回调。
+
 ## 与自动化测试平台集成
 
 1. 安装固定包名 `com.example.gnsslogger` 的构建产物。
 2. 首次建议通过 UI 完成权限授权；无人值守可在支持设备上使用 `adb shell pm grant` 授予运行时权限（视 ROM 策略而定）。
 3. 用 **开始/停止** 广播控制采集生命周期；在切换用例时发送 **更新场景** 广播，后续 CSV 行中的 `scene_name` 即切换为新值。
 4. 拉取 `Android/data/com.example.gnsslogger/files/gnss/` 下 CSV 与自动化框架对齐时间轴与用例 ID。
+5. 也可以通过 App 内 **导出本次 CSV** 分享当前会话文件。
 
 ## CI 与发布
 
@@ -114,13 +139,6 @@ adb shell am broadcast -n com.example.gnsslogger/com.example.gnsslogger.GnssComm
 git tag v1.0.0
 git push origin v1.0.0
 ```
-
-## 后续扩展方向
-
-- NMEA 原始数据记录与解析管线。
-- 卫星天空图、C/N0 曲线等可视化。
-- 通过 adb / Wi-Fi 将 CSV 同步到 PC。
-- 与 CMW500 等仪表的自动化序列联动（时间戳与场景字段对齐）。
 
 ## 工程与构建
 

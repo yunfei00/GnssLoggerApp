@@ -86,11 +86,11 @@
             android:text="@string/action_open_dir" />
 
         <Button
-            android:id="@+id/buttonTestScene"
+            android:id="@+id/buttonShareCsv"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="@string/action_test_scene" />
+            android:text="@string/action_share_csv" />
 
         <TextView
             android:layout_width="match_parent"
@@ -127,6 +127,27 @@
                 android:maxLines="1" />
         </com.google.android.material.textfield.TextInputLayout>
 
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:hint="@string/hint_scene_name">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/inputScene"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="text"
+                android:maxLines="1" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <Button
+            android:id="@+id/buttonUpdateScene"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/action_update_scene" />
+
         <com.google.android.material.materialswitch.MaterialSwitch
             android:id="@+id/switchDateSubdir"
             android:layout_width="match_parent"
@@ -139,7 +160,14 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="@string/switch_nmea_placeholder" />
+            android:text="@string/switch_nmea" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switchRaw"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/switch_raw_measurements" />
 
         <TextView
             android:layout_width="match_parent"
