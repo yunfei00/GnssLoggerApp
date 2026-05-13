@@ -1,6 +1,7 @@
 <resources>
     <string name="app_name">GNSS Data Logger</string>
     <string name="section_status">状态</string>
+    <string name="section_gnss_status">GNSS 状态</string>
     <string name="section_config">配置</string>
     <string name="section_satellites">实时卫星</string>
     <string name="label_satellite_table_hint">列表与顶部统计一致，共 %1$d 条；请向下滚动查看全部。</string>

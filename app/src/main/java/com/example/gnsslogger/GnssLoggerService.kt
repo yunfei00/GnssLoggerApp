@@ -15,6 +15,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.example.gnsslogger.data.GnssRecordingPhase
 import com.example.gnsslogger.data.GnssSessionState
 import com.example.gnsslogger.data.LoggingUiStatus
 import com.example.gnsslogger.gnss.GnssCollector
@@ -55,6 +56,25 @@ class GnssLoggerService : Service() {
     private var provisionalForeground = false
     private var recordNmea = true
     private var recordRawMeasurements = true
+    private var recordingPhase = GnssRecordingPhase.IDLE
+    private var warmupStartedElapsedMs = 0L
+    private var recordingStartedElapsedMs = 0L
+    private var currentAccuracyM: Float? = null
+    private var latestAverageCn0DbHz: Float? = null
+    private var latestVisibleSatelliteCount = 0
+    private var latestUsedInFixCount = 0
+    private var zeroUsedInFixSinceElapsedMs: Long? = null
+    private var zeroFixWarningLogged = false
+    private var hasNmeaGga = false
+    private var hasNmeaRmc = false
+    private var hasNmeaGsa = false
+    private var hasNmeaGsv = false
+    private var nmeaIncompleteWarningLogged = false
+    private var trackPointCount = 0L
+    private var accuracySum = 0.0
+    private var bestAccuracyM: Float? = null
+    private var worstAccuracyM: Float? = null
+    private var kmlGenerated = false
 
     private var csvExecutor = newCsvExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -118,9 +138,11 @@ class GnssLoggerService : Service() {
         }
         try {
             csvWriter?.closeSafely()
+            locationCsvLogger?.closeSafely()
         } catch (_: Exception) {
         }
         csvWriter = null
+        locationCsvLogger = null
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -217,6 +239,14 @@ class GnssLoggerService : Service() {
         writer.open()
         csvWriter = writer
         locationCsvLogger = LocationCsvLogger(java.io.File(paths.locationCsvAbsolutePath)).also { it.open() }
+        resetQualityState()
+        recordingPhase = GnssRecordingPhase.WARMING_UP
+        warmupStartedElapsedMs = SystemClock.elapsedRealtime()
+        recordsWritten.set(0L)
+        rawRecordsWritten.set(0L)
+        nmeaRecordsWritten.set(0L)
+        lastNotifiedRecords = 0L
+        isLogging = true
 
         val thread = HandlerThread("gnss-callbacks").apply { start() }
         gnssThread = thread
@@ -233,12 +263,7 @@ class GnssLoggerService : Service() {
         collector = collectorInstance
         collectorInstance.start()
 
-        isLogging = true
         provisionalForeground = false
-        recordsWritten.set(0L)
-        rawRecordsWritten.set(0L)
-        nmeaRecordsWritten.set(0L)
-        lastNotifiedRecords = 0L
         val notification = NotificationHelper.buildForegroundNotification(
             this,
             csvFileName,
@@ -249,6 +274,7 @@ class GnssLoggerService : Service() {
         _sessionState.update {
             it.copy(
                 status = LoggingUiStatus.LOGGING,
+                recordingPhase = recordingPhase,
                 sessionId = sessionId,
                 csvPath = csvPath,
                 rawCsvPath = rawCsvPath,
@@ -261,8 +287,45 @@ class GnssLoggerService : Service() {
                 nmeaRecordsWritten = 0L,
                 lastError = null,
                 gpsEnabled = true,
+                currentAccuracyM = null,
+                canStartFormalRecording = false,
+                averageCn0DbHz = null,
+                gnssFixWarning = null,
+                nmeaWarning = null,
+                hasNmeaGga = false,
+                hasNmeaRmc = false,
+                hasNmeaGsa = false,
+                hasNmeaGsv = false,
+                recordingDurationMs = 0L,
+                trackPointCount = 0L,
+                averageAccuracyM = null,
+                bestAccuracyM = null,
+                worstAccuracyM = null,
+                kmlGenerated = false,
             )
         }
+    }
+
+    private fun resetQualityState() {
+        recordingPhase = GnssRecordingPhase.IDLE
+        warmupStartedElapsedMs = 0L
+        recordingStartedElapsedMs = 0L
+        currentAccuracyM = null
+        latestAverageCn0DbHz = null
+        latestVisibleSatelliteCount = 0
+        latestUsedInFixCount = 0
+        zeroUsedInFixSinceElapsedMs = null
+        zeroFixWarningLogged = false
+        hasNmeaGga = false
+        hasNmeaRmc = false
+        hasNmeaGsa = false
+        hasNmeaGsv = false
+        nmeaIncompleteWarningLogged = false
+        trackPointCount = 0L
+        accuracySum = 0.0
+        bestAccuracyM = null
+        worstAccuracyM = null
+        kmlGenerated = false
     }
 
     private fun onGnssFrame(frame: GnssStatusFrame) {
@@ -271,10 +334,16 @@ class GnssLoggerService : Service() {
         val ts = System.currentTimeMillis()
         val elapsedNanos = SystemClock.elapsedRealtimeNanos()
         val loc = collector?.lastLocation
+        latestVisibleSatelliteCount = frame.visibleCount
+        latestUsedInFixCount = frame.usedInFixCount
+        latestAverageCn0DbHz = averageCn0(frame)
+        updateZeroFixWarning(frame.usedInFixCount)
+        maybeAllowPoorAccuracyRecording()
+        val shouldWrite = isFormalRecording()
 
         enqueueCsvWrite {
             try {
-                val lines = if (frame.satellites.isEmpty()) {
+                val lines = if (!shouldWrite || frame.satellites.isEmpty()) {
                     0L
                 } else {
                     writer.writeSatelliteFrame(
@@ -294,13 +363,29 @@ class GnssLoggerService : Service() {
                 mainHandler.post {
                     _sessionState.update { prev ->
                         prev.copy(
+                            recordingPhase = recordingPhase,
                             visibleSatelliteCount = frame.visibleCount,
                             usedInFixCount = frame.usedInFixCount,
+                            averageCn0DbHz = latestAverageCn0DbHz,
+                            currentAccuracyM = currentAccuracyM,
+                            canStartFormalRecording = canStartFormalRecording(),
+                            gnssFixWarning = gnssFixWarning(),
+                            nmeaWarning = nmeaWarning(),
+                            hasNmeaGga = hasNmeaGga,
+                            hasNmeaRmc = hasNmeaRmc,
+                            hasNmeaGsa = hasNmeaGsa,
+                            hasNmeaGsv = hasNmeaGsv,
                             satellites = frame.satellites,
                             lastUpdateElapsedRealtimeMs = SystemClock.elapsedRealtime(),
                             recordsWritten = recordsWritten.get(),
                             rawRecordsWritten = rawRecordsWritten.get(),
                             nmeaRecordsWritten = nmeaRecordsWritten.get(),
+                            recordingDurationMs = currentRecordingDurationMs(),
+                            trackPointCount = trackPointCount,
+                            averageAccuracyM = averageAccuracyM(),
+                            bestAccuracyM = bestAccuracyM,
+                            worstAccuracyM = worstAccuracyM,
+                            kmlGenerated = kmlGenerated,
                             csvPath = csvPath,
                             rawCsvPath = rawCsvPath,
                             nmeaCsvPath = nmeaCsvPath,
@@ -318,22 +403,138 @@ class GnssLoggerService : Service() {
         }
     }
 
+    private fun averageCn0(frame: GnssStatusFrame): Float? {
+        val values = frame.satellites
+            .map { it.cn0DbHz }
+            .filter { it.isFinite() && it > 0f }
+        if (values.isEmpty()) return null
+        return values.sum() / values.size
+    }
+
+    private fun updateZeroFixWarning(usedInFixCount: Int) {
+        val now = SystemClock.elapsedRealtime()
+        zeroUsedInFixSinceElapsedMs = if (usedInFixCount > 0) {
+            zeroFixWarningLogged = false
+            null
+        } else {
+            zeroUsedInFixSinceElapsedMs ?: now
+        }
+    }
+
+    private fun gnssFixWarning(): String? {
+        val zeroSince = zeroUsedInFixSinceElapsedMs ?: return null
+        val now = SystemClock.elapsedRealtime()
+        return if (now - zeroSince >= FIX_WARNING_AFTER_MS && isLogging) {
+            if (!zeroFixWarningLogged) {
+                zeroFixWarningLogged = true
+                Log.w(TAG, "used_in_fix_count remained 0; GNSS fix is not stable")
+            }
+            "当前未形成稳定 GNSS Fix，轨迹精度可能较差。"
+        } else {
+            null
+        }
+    }
+
+    private fun maybeAllowPoorAccuracyRecording() {
+        if (recordingPhase != GnssRecordingPhase.WARMING_UP) return
+        val started = warmupStartedElapsedMs.takeIf { it > 0L } ?: return
+        if (SystemClock.elapsedRealtime() - started >= WARMUP_TIMEOUT_MS) {
+            beginFormalRecording(poorAccuracy = true)
+        }
+    }
+
+    private fun beginFormalRecording(poorAccuracy: Boolean) {
+        if (isFormalRecording()) return
+        recordingPhase = if (poorAccuracy) GnssRecordingPhase.POOR_ACCURACY else GnssRecordingPhase.RECORDING
+        recordingStartedElapsedMs = SystemClock.elapsedRealtime()
+    }
+
+    private fun isFormalRecording(): Boolean =
+        recordingPhase == GnssRecordingPhase.RECORDING ||
+            recordingPhase == GnssRecordingPhase.POOR_ACCURACY
+
+    private fun canStartFormalRecording(): Boolean =
+        currentAccuracyM?.let { it.isFinite() && it <= FORMAL_RECORDING_ACCURACY_M } == true
+
 
     private fun onLocationUpdate(location: android.location.Location) {
+        currentAccuracyM = if (location.hasAccuracy() && location.accuracy.isFinite()) {
+            location.accuracy
+        } else {
+            null
+        }
+        if (recordingPhase == GnssRecordingPhase.WARMING_UP && canStartFormalRecording()) {
+            beginFormalRecording(poorAccuracy = false)
+        } else {
+            maybeAllowPoorAccuracyRecording()
+        }
+        refreshRecordingPhaseForCurrentAccuracy()
+        postSessionQualityState()
+
+        if (!isFormalRecording()) return
+        if (!isValidLocationForCsv(location)) return
         val logger = locationCsvLogger ?: return
+        val accuracy = currentAccuracyM ?: return
+        val quality = qualityForAccuracy(accuracy)
         enqueueCsvWrite {
             try {
-                logger.writeLocation(location, scene = "default")
+                logger.writeLocation(
+                    location = location,
+                    quality = quality,
+                    satelliteCount = latestVisibleSatelliteCount,
+                    usedInFixCount = latestUsedInFixCount,
+                    averageCn0DbHz = latestAverageCn0DbHz,
+                    scene = "default",
+                )
+                updateLocationStats(accuracy)
+                postWriteStats()
             } catch (e: Exception) {
                 mainHandler.post { publishError("写入 location.csv 失败: ${e.message}") }
             }
         }
     }
 
+    private fun isValidLocationForCsv(location: android.location.Location): Boolean {
+        val lat = location.latitude
+        val lon = location.longitude
+        val acc = currentAccuracyM
+        if (!lat.isFinite() || !lon.isFinite()) return false
+        if (lat == 0.0 && lon == 0.0) return false
+        if (acc == null || !acc.isFinite()) return false
+        return acc <= MAX_RECORDING_ACCURACY_M
+    }
+
+    private fun qualityForAccuracy(accuracyM: Float): String =
+        when {
+            accuracyM <= 5f -> "excellent"
+            accuracyM <= 10f -> "good"
+            accuracyM <= 20f -> "fair"
+            else -> "poor"
+        }
+
+    private fun refreshRecordingPhaseForCurrentAccuracy() {
+        if (!isFormalRecording()) return
+        val accuracy = currentAccuracyM ?: return
+        recordingPhase = if (accuracy > FORMAL_RECORDING_ACCURACY_M) {
+            GnssRecordingPhase.POOR_ACCURACY
+        } else {
+            GnssRecordingPhase.RECORDING
+        }
+    }
+
+    private fun updateLocationStats(accuracyM: Float) {
+        trackPointCount++
+        accuracySum += accuracyM.toDouble()
+        bestAccuracyM = bestAccuracyM?.let { minOf(it, accuracyM) } ?: accuracyM
+        worstAccuracyM = worstAccuracyM?.let { maxOf(it, accuracyM) } ?: accuracyM
+    }
+
     private fun onRawMeasurementsFrame(frame: RawGnssMeasurementsFrame) {
         val writer = csvWriter ?: return
         val sid = sessionId ?: return
         if (frame.measurements.isEmpty()) return
+        maybeAllowPoorAccuracyRecording()
+        if (!isFormalRecording()) return
         val ts = System.currentTimeMillis()
         val elapsedNanos = SystemClock.elapsedRealtimeNanos()
 
@@ -361,6 +562,10 @@ class GnssLoggerService : Service() {
     private fun onNmeaFrame(frame: NmeaMessageFrame) {
         val writer = csvWriter ?: return
         val sid = sessionId ?: return
+        updateNmeaState(frame.message)
+        maybeAllowPoorAccuracyRecording()
+        postSessionQualityState()
+        if (!isFormalRecording()) return
         val ts = System.currentTimeMillis()
         val elapsedNanos = SystemClock.elapsedRealtimeNanos()
 
@@ -386,14 +591,87 @@ class GnssLoggerService : Service() {
         }
     }
 
+    private fun updateNmeaState(message: String) {
+        when (parseNmeaType(message)) {
+            "GGA" -> hasNmeaGga = true
+            "RMC" -> hasNmeaRmc = true
+            "GSA" -> hasNmeaGsa = true
+            "GSV" -> hasNmeaGsv = true
+        }
+    }
+
+    private fun parseNmeaType(message: String): String? {
+        val sentence = message.trim()
+        if (!sentence.startsWith("\$") || sentence.length < 6) return null
+        return sentence.substring(3, 6).uppercase()
+    }
+
+    private fun nmeaWarning(): String? =
+        if (hasNmeaGsv && !hasNmeaGga && !hasNmeaRmc && !hasNmeaGsa) {
+            if (!nmeaIncompleteWarningLogged) {
+                nmeaIncompleteWarningLogged = true
+                Log.w(TAG, "Only GSV NMEA received; GGA/RMC/GSA positioning sentences are missing")
+            }
+            "当前仅收到卫星可见信息，缺少完整定位解算 NMEA。"
+        } else {
+            nmeaIncompleteWarningLogged = false
+            null
+        }
+
+    private fun postSessionQualityState() {
+        mainHandler.post {
+            _sessionState.update { prev ->
+                prev.copy(
+                    recordingPhase = recordingPhase,
+                    visibleSatelliteCount = latestVisibleSatelliteCount,
+                    usedInFixCount = latestUsedInFixCount,
+                    averageCn0DbHz = latestAverageCn0DbHz,
+                    currentAccuracyM = currentAccuracyM,
+                    canStartFormalRecording = canStartFormalRecording(),
+                    gnssFixWarning = gnssFixWarning(),
+                    nmeaWarning = nmeaWarning(),
+                    hasNmeaGga = hasNmeaGga,
+                    hasNmeaRmc = hasNmeaRmc,
+                    hasNmeaGsa = hasNmeaGsa,
+                    hasNmeaGsv = hasNmeaGsv,
+                    recordingDurationMs = currentRecordingDurationMs(),
+                    trackPointCount = trackPointCount,
+                    averageAccuracyM = averageAccuracyM(),
+                    bestAccuracyM = bestAccuracyM,
+                    worstAccuracyM = worstAccuracyM,
+                    kmlGenerated = kmlGenerated,
+                    lastUpdateElapsedRealtimeMs = SystemClock.elapsedRealtime(),
+                )
+            }
+        }
+    }
+
     private fun postWriteStats() {
         mainHandler.post {
             _sessionState.update { prev ->
                 prev.copy(
+                    recordingPhase = recordingPhase,
+                    currentAccuracyM = currentAccuracyM,
+                    visibleSatelliteCount = latestVisibleSatelliteCount,
+                    usedInFixCount = latestUsedInFixCount,
+                    averageCn0DbHz = latestAverageCn0DbHz,
+                    canStartFormalRecording = canStartFormalRecording(),
+                    gnssFixWarning = gnssFixWarning(),
+                    nmeaWarning = nmeaWarning(),
+                    hasNmeaGga = hasNmeaGga,
+                    hasNmeaRmc = hasNmeaRmc,
+                    hasNmeaGsa = hasNmeaGsa,
+                    hasNmeaGsv = hasNmeaGsv,
                     lastUpdateElapsedRealtimeMs = SystemClock.elapsedRealtime(),
                     recordsWritten = recordsWritten.get(),
                     rawRecordsWritten = rawRecordsWritten.get(),
                     nmeaRecordsWritten = nmeaRecordsWritten.get(),
+                    recordingDurationMs = currentRecordingDurationMs(),
+                    trackPointCount = trackPointCount,
+                    averageAccuracyM = averageAccuracyM(),
+                    bestAccuracyM = bestAccuracyM,
+                    worstAccuracyM = worstAccuracyM,
+                    kmlGenerated = kmlGenerated,
                     csvPath = csvPath,
                     rawCsvPath = rawCsvPath,
                     nmeaCsvPath = nmeaCsvPath,
@@ -408,6 +686,15 @@ class GnssLoggerService : Service() {
     private var lastNotifiedRecords = 0L
     private fun totalRecordsWritten(): Long =
         recordsWritten.get() + rawRecordsWritten.get() + nmeaRecordsWritten.get()
+
+    private fun currentRecordingDurationMs(): Long {
+        val started = recordingStartedElapsedMs
+        if (started <= 0L) return 0L
+        return (SystemClock.elapsedRealtime() - started).coerceAtLeast(0L)
+    }
+
+    private fun averageAccuracyM(): Float? =
+        if (trackPointCount > 0L) (accuracySum / trackPointCount).toFloat() else null
 
     private fun maybeRefreshNotification(total: Long) {
         if (total <= 0L) return
@@ -444,17 +731,34 @@ class GnssLoggerService : Service() {
         }
 
         val kmlMsg = exportTrackKmlOnStop()
+        recordingPhase = GnssRecordingPhase.STOPPED
 
         _sessionState.update {
             it.copy(
                 status = LoggingUiStatus.STOPPED,
+                recordingPhase = recordingPhase,
                 satellites = emptyList(),
-                visibleSatelliteCount = 0,
-                usedInFixCount = 0,
+                visibleSatelliteCount = latestVisibleSatelliteCount,
+                usedInFixCount = latestUsedInFixCount,
+                averageCn0DbHz = latestAverageCn0DbHz,
+                currentAccuracyM = currentAccuracyM,
+                canStartFormalRecording = false,
+                gnssFixWarning = gnssFixWarning(),
+                nmeaWarning = nmeaWarning(),
+                hasNmeaGga = hasNmeaGga,
+                hasNmeaRmc = hasNmeaRmc,
+                hasNmeaGsa = hasNmeaGsa,
+                hasNmeaGsv = hasNmeaGsv,
                 lastError = kmlMsg ?: reason,
                 recordsWritten = recordsWritten.get(),
                 rawRecordsWritten = rawRecordsWritten.get(),
                 nmeaRecordsWritten = nmeaRecordsWritten.get(),
+                recordingDurationMs = currentRecordingDurationMs(),
+                trackPointCount = trackPointCount,
+                averageAccuracyM = averageAccuracyM(),
+                bestAccuracyM = bestAccuracyM,
+                worstAccuracyM = worstAccuracyM,
+                kmlGenerated = kmlGenerated,
                 csvPath = csvPath,
                 rawCsvPath = rawCsvPath,
                 nmeaCsvPath = nmeaCsvPath,
@@ -477,12 +781,19 @@ class GnssLoggerService : Service() {
 
         return try {
             val result = KmlExporter.exportFromLocationCsv(locationFile, kmlFile)
-            "已生成 CSV 和 KML，KML 可导入 Google Earth Pro。track.kml 已生成（${result.pointCount} 个轨迹点）"
+            kmlGenerated = true
+            if (result.lineGenerated) {
+                "已生成 CSV 和 KML，KML 可导入 Google Earth Pro。track.kml 已生成（${result.pointCount} 个轨迹点）"
+            } else {
+                "KML 已生成，但有效轨迹点不足 2 个，未生成轨迹线"
+            }
         } catch (e: NoValidTrackPointsException) {
             Log.w(TAG, "Skip KML export: ${e.message}")
+            kmlGenerated = false
             "track.kml：未生成，无有效轨迹点"
         } catch (e: Exception) {
             Log.e(TAG, "Failed to export KML from ${locationFile.absolutePath}", e)
+            kmlGenerated = false
             "KML 生成失败: ${e.message ?: e.javaClass.simpleName}"
         }
     }
@@ -526,6 +837,10 @@ class GnssLoggerService : Service() {
 
     companion object {
         private const val TAG = "GnssLoggerService"
+        private const val FORMAL_RECORDING_ACCURACY_M = 20f
+        private const val MAX_RECORDING_ACCURACY_M = 100f
+        private const val WARMUP_TIMEOUT_MS = 30_000L
+        private const val FIX_WARNING_AFTER_MS = 10_000L
         const val NOTIFICATION_ID = 77001
         const val PREFS = "gnss_logger_prefs"
         const val KEY_PREFIX = "filename_prefix"

@@ -39,6 +39,27 @@
             android:visibility="gone" />
 
         <TextView
+            android:id="@+id/textGnssStatusTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="12dp"
+            android:text="@string/section_gnss_status"
+            android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+        <TextView
+            android:id="@+id/textGnssStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp" />
+
+        <TextView
+            android:id="@+id/textSessionStats"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:visibility="gone" />
+
+        <TextView
             android:id="@+id/textSatCounts"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

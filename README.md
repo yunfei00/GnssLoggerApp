@@ -9,9 +9,10 @@
 - `GnssStatus.Callback` 获取可见卫星、参与定位卫星、星座、SVID、C/N0、方位角、仰角等。
 - `OnNmeaMessageListener` 记录原始 NMEA 句子。
 - `GnssMeasurementsEvent.Callback` 记录 Raw GNSS Measurements。
+- 高精度 1 秒定位请求，启动后先预热，精度达标后再正式写入轨迹点。
 - 实时 `flush` 的多 CSV 写入，降低异常退出时的数据丢失。
 - 广播：`ACTION_START_LOGGING` / `ACTION_STOP_LOGGING` / `ACTION_UPDATE_SCENE`。
-- 主界面展示状态、场景、文件生成状态、卫星表格、写入计数、分享/保存入口与配置项。
+- 主界面展示状态、场景、GNSS 精度、Fix 状态、NMEA 完整性、文件生成状态、卫星表格、写入计数、分享/保存入口与配置项。
 
 ## 权限说明
 
@@ -27,12 +28,13 @@
 
 1. 安装 APK 后打开应用，授予通知（若系统要求）、定位及（建议）后台定位。
 2. 设置文件名前缀、测试场景标签、是否按日期建子目录，以及是否记录 NMEA / Raw GNSS。
-3. 点击 **开始采集**：出现前台通知后开始写 CSV；可退回桌面或锁屏继续采集。
+3. 点击 **开始采集**：出现前台通知后进入预热状态；可退回桌面或锁屏继续采集。
 4. 采集中可随时修改测试场景标签，后续 CSV 行会写入新的 `scene_name`。
-5. 点击 **停止采集**：关闭写入并结束前台服务；下次开始会生成新的 `session_id` 与新 CSV 文件。
-6. 停止采集后会生成 CSV 和 KML，并在界面显示 `location.csv`、`satellites.csv`、`track.kml` 的生成状态。
-7. 点击 **分享本次数据** 可通过系统分享面板把本次 `*_location.csv`、`*_satellites.csv`、`*_track.kml` 发送到电脑或其它应用。
-8. 点击 **保存到下载目录** 可将本次文件复制到 `Download/GnssLogger/<session_name>/`。
+5. 当 `accuracy_m <= 20m` 时自动进入正式记录；如果 30 秒仍未达标，会继续记录并提示当前精度较差。
+6. 点击 **停止采集**：关闭写入并结束前台服务；下次开始会生成新的 `session_id` 与新 CSV 文件。
+7. 停止采集后会生成 CSV 和 KML，并在界面显示 `location.csv`、`satellites.csv`、`track.kml` 的生成状态和本次统计。
+8. 点击 **分享本次数据** 可通过系统分享面板把本次 `*_location.csv`、`*_satellites.csv`、`*_track.kml` 发送到电脑或其它应用。
+9. 点击 **保存到下载目录** 可将本次文件复制到 `Download/GnssLogger/<session_name>/`。
 
 CSV 默认目录（与 Android 应用专属外部目录一致）：
 
@@ -80,10 +82,10 @@ adb shell am broadcast -n com.example.gnsslogger/com.example.gnsslogger.GnssComm
 
 每个会话默认生成：
 
-- `*_satellites.csv`：定位 + 卫星状态。
-- `*_location.csv`：按定位回调记录的经纬度、海拔、速度、精度与时间戳。
-- `*_raw.csv`：Raw GNSS Measurements（开启 Raw 记录时生成）。
-- `*_nmea.csv`：NMEA 原始句子（开启 NMEA 记录时生成）。
+- `*_location.csv`：定位轨迹，包含经纬度、海拔、速度、精度、质量等级与当时卫星摘要。
+- `*_satellites.csv`：卫星状态，包含每颗卫星的 C/N0、方位角、仰角、`used_in_fix` 与每帧 `used_in_fix_count`。
+- `*_nmea.csv`：NMEA 原始语句（开启 NMEA 记录时生成）。
+- `*_raw.csv`：GNSS Raw Measurement（开启 Raw 记录时生成）。
 - `*_track.kml`：基于 `*_location.csv` 生成的 Google Earth Pro 轨迹文件。
 
 停止采集时，App 会自动根据 `*_location.csv` 生成同名前缀的 `*_track.kml`。例如：
@@ -96,6 +98,25 @@ adb shell am broadcast -n com.example.gnsslogger/com.example.gnsslogger.GnssComm
 `Download/GnssLogger/<session_name>/`
 
 `*_track.kml` 可直接用 Google Earth Pro 打开，导入方式为：**文件 -> 打开 -> 选择 `*_track.kml`**。
+
+## 定位质量判断
+
+App 会按定位精度写入 `quality` 字段，并在首页显示中文质量：
+
+| accuracy_m | quality | 界面显示 |
+|------|------|------|
+| `<= 5m` | `excellent` | 优秀 |
+| `<= 10m` | `good` | 良好 |
+| `<= 20m` | `fair` | 一般 |
+| `> 20m` | `poor` | 较差 |
+
+正式记录时会跳过无效定位点：经纬度为空、`0,0`、没有 `accuracy_m`、或 `accuracy_m > 100m`。如果 `used_in_fix_count` 长时间为 0，界面会提示当前未形成稳定 GNSS Fix；如果 NMEA 只有 GSV 而没有 GGA/RMC/GSA，界面会提示缺少完整定位解算 NMEA。
+
+测试建议：
+
+- 采集前预热 30~60 秒。
+- 等 `accuracy_m` 降到 10~20m 后再正式记录。
+- GSS7000 测试时确认手机已经稳定 Fix，并关注 `used_in_fix_count`、平均 CN0 与 NMEA GGA/RMC/GSA 是否出现。
 
 ## CSV 字段说明
 
@@ -122,6 +143,13 @@ adb shell am broadcast -n com.example.gnsslogger/com.example.gnsslogger.GnssComm
 
 - `message` 保留原始 NMEA 句子内容。
 - `nmea_timestamp_ms` 来自 Android NMEA 回调。
+
+### `*_location.csv`
+
+`timestamp_ms,timestamp_iso,provider,latitude,longitude,altitude_m,speed_mps,bearing_deg,accuracy_m,vertical_accuracy_m,speed_accuracy_mps,bearing_accuracy_deg,elapsed_realtime_nanos,scene,quality,satellite_count,used_in_fix_count,average_cn0_dbhz`
+
+- `quality` 基于 `accuracy_m` 写入：`excellent` / `good` / `fair` / `poor`。
+- `satellite_count`、`used_in_fix_count`、`average_cn0_dbhz` 是写入该定位点时最近一次卫星状态摘要。
 
 ## 与自动化测试平台集成
 

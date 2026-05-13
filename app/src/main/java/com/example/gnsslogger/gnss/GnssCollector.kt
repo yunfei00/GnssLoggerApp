@@ -9,11 +9,13 @@ import android.location.GnssStatus
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.location.LocationRequest
 import android.location.OnNmeaMessageListener
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import com.example.gnsslogger.data.GnssSatelliteRecord
+import java.util.concurrent.Executor
 
 data class GnssStatusFrame(
     val satellites: List<GnssSatelliteRecord>,
@@ -45,6 +47,7 @@ class GnssCollector(
     private val locationManager =
         appContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     private val callbackHandler = Handler(callbackLooper)
+    private val callbackExecutor = Executor { command -> callbackHandler.post(command) }
 
     private val gnssCallback = object : GnssStatus.Callback() {
         override fun onSatelliteStatusChanged(status: GnssStatus) {
@@ -89,13 +92,7 @@ class GnssCollector(
             return
         }
         try {
-            locationManager.requestLocationUpdates(
-                LocationManager.GPS_PROVIDER,
-                1000L,
-                0f,
-                locationListener,
-                callbackLooper,
-            )
+            requestHighAccuracyLocationUpdates()
         } catch (_: SecurityException) {
         }
         if (collectNmea) {
@@ -133,6 +130,32 @@ class GnssCollector(
 
     fun isGpsProviderEnabled(): Boolean =
         locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+
+    @SuppressLint("MissingPermission")
+    private fun requestHighAccuracyLocationUpdates() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val request = LocationRequest.Builder(LOCATION_INTERVAL_MS)
+                .setMinUpdateIntervalMillis(LOCATION_FASTEST_INTERVAL_MS)
+                .setMinUpdateDistanceMeters(0f)
+                .setQuality(LocationRequest.QUALITY_HIGH_ACCURACY)
+                .build()
+            locationManager.requestLocationUpdates(
+                LocationManager.GPS_PROVIDER,
+                request,
+                callbackExecutor,
+                locationListener,
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            locationManager.requestLocationUpdates(
+                LocationManager.GPS_PROVIDER,
+                LOCATION_INTERVAL_MS,
+                0f,
+                locationListener,
+                callbackLooper,
+            )
+        }
+    }
 
     private fun buildFrame(status: GnssStatus): GnssStatusFrame {
         val n = status.satelliteCount
@@ -174,5 +197,10 @@ class GnssCollector(
             )
         }
         return GnssStatusFrame(list, n, used)
+    }
+
+    companion object {
+        private const val LOCATION_INTERVAL_MS = 1_000L
+        private const val LOCATION_FASTEST_INTERVAL_MS = 1_000L
     }
 }

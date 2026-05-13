@@ -6,6 +6,7 @@ import java.util.Locale
 data class KmlExportResult(
     val outputFile: File,
     val pointCount: Int,
+    val lineGenerated: Boolean,
 )
 
 class NoValidTrackPointsException(message: String) : IllegalStateException(message)
@@ -15,6 +16,8 @@ private data class TrackPoint(
     val longitude: Double,
     val altitude: Double,
     val timestamp: String?,
+    val timestampMs: Long?,
+    val accuracyM: Double?,
 )
 
 object KmlExporter {
@@ -31,6 +34,7 @@ object KmlExporter {
             out.appendLine("<kml xmlns=\"http://www.opengis.net/kml/2.2\">")
             out.appendLine("  <Document>")
             out.appendLine("    <name>${escapeXml(outputKml.nameWithoutExtension)}</name>")
+            out.appendLine("    <description>${escapeXml(summaryDescription(points))}</description>")
             out.appendLine("    <Style id=\"trackStyle\">")
             out.appendLine("      <LineStyle>")
             out.appendLine("        <color>ff0000ff</color>")
@@ -41,24 +45,36 @@ object KmlExporter {
             writePointPlacemark(out, "Start Point", points.first())
             writePointPlacemark(out, "End Point", points.last())
 
-            out.appendLine("    <Placemark>")
-            out.appendLine("      <name>GNSS Track</name>")
-            out.appendLine("      <styleUrl>#trackStyle</styleUrl>")
-            out.appendLine("      <LineString>")
-            out.appendLine("        <tessellate>1</tessellate>")
-            out.appendLine("        <altitudeMode>clampToGround</altitudeMode>")
-            out.appendLine("        <coordinates>")
-            points.forEach { p ->
-                out.appendLine("          ${fmt8(p.longitude)},${fmt8(p.latitude)},${fmt2(p.altitude)}")
+            if (points.size >= 2) {
+                out.appendLine("    <Placemark>")
+                out.appendLine("      <name>GNSS Track</name>")
+                out.appendLine("      <description>${escapeXml(summaryDescription(points))}</description>")
+                out.appendLine("      <styleUrl>#trackStyle</styleUrl>")
+                out.appendLine("      <LineString>")
+                out.appendLine("        <tessellate>1</tessellate>")
+                out.appendLine("        <altitudeMode>clampToGround</altitudeMode>")
+                out.appendLine("        <coordinates>")
+                points.forEach { p ->
+                    out.appendLine("          ${fmt8(p.longitude)},${fmt8(p.latitude)},${fmt2(p.altitude)}")
+                }
+                out.appendLine("        </coordinates>")
+                out.appendLine("      </LineString>")
+                out.appendLine("    </Placemark>")
+            } else {
+                out.appendLine("    <Placemark>")
+                out.appendLine("      <name>有效轨迹点不足，未生成轨迹线</name>")
+                out.appendLine("      <description>${escapeXml(summaryDescription(points))}</description>")
+                out.appendLine("    </Placemark>")
             }
-            out.appendLine("        </coordinates>")
-            out.appendLine("      </LineString>")
-            out.appendLine("    </Placemark>")
             out.appendLine("  </Document>")
             out.appendLine("</kml>")
         }
 
-        return KmlExportResult(outputFile = outputKml, pointCount = points.size)
+        return KmlExportResult(
+            outputFile = outputKml,
+            pointCount = points.size,
+            lineGenerated = points.size >= 2,
+        )
     }
 
     private fun parseValidPoints(locationCsv: File): List<TrackPoint> {
@@ -96,6 +112,8 @@ object KmlExporter {
         val longitude: Int,
         val altitude: Int?,
         val timestamp: Int?,
+        val timestampMs: Int?,
+        val accuracy: Int?,
     ) {
         fun parsePoint(cols: List<String>): TrackPoint? {
             val lat = cols.getOrNull(latitude)?.toDoubleOrNull() ?: return null
@@ -104,11 +122,15 @@ object KmlExporter {
 
             val alt = altitude?.let { cols.getOrNull(it)?.toDoubleOrNull() } ?: 0.0
             val safeAlt = if (alt.isNaN() || alt.isInfinite()) 0.0 else alt
+            val accuracyM = accuracy?.let { cols.getOrNull(it)?.toDoubleOrNull() }
+            if (accuracy != null && (accuracyM == null || !accuracyM.isFinite() || accuracyM > 100.0)) return null
             return TrackPoint(
                 latitude = lat,
                 longitude = lon,
                 altitude = safeAlt,
                 timestamp = timestamp?.let { cols.getOrNull(it) }?.takeIf { it.isNotBlank() },
+                timestampMs = timestampMs?.let { cols.getOrNull(it)?.toLongOrNull() },
+                accuracyM = accuracyM,
             )
         }
 
@@ -119,8 +141,10 @@ object KmlExporter {
                     latitude = normalized.firstIndexOf("latitude", "lat").takeIf { it >= 0 } ?: 3,
                     longitude = normalized.firstIndexOf("longitude", "lon", "lng").takeIf { it >= 0 } ?: 4,
                     altitude = normalized.firstIndexOf("altitude_m", "altitude", "alt").takeIf { it >= 0 } ?: 5,
-                    timestamp = normalized.firstIndexOf("timestamp_iso", "timestamp", "time", "timestamp_ms")
-                        .takeIf { it >= 0 },
+                    timestamp = normalized.indexOf("timestamp_iso").takeIf { it >= 0 }
+                        ?: normalized.firstIndexOf("timestamp", "time", "timestamp_ms").takeIf { it >= 0 },
+                    timestampMs = normalized.firstIndexOf("timestamp_ms").takeIf { it >= 0 },
+                    accuracy = normalized.firstIndexOf("accuracy_m", "accuracy").takeIf { it >= 0 },
                 )
             }
         }
@@ -169,6 +193,31 @@ object KmlExporter {
             .replace(">", "&gt;")
             .replace("\"", "&quot;")
             .replace("'", "&apos;")
+
+    private fun summaryDescription(points: List<TrackPoint>): String {
+        val avgAccuracy = points.mapNotNull { it.accuracyM }.takeIf { it.isNotEmpty() }?.average()
+        val durationMs = durationMs(points)
+        return buildString {
+            append("轨迹点数量: ${points.size}")
+            append('\n')
+            append("平均精度: ${avgAccuracy?.let { fmt2(it) + " m" } ?: "未知"}")
+            append('\n')
+            append("采集时间: ${durationMs?.let { formatDuration(it) } ?: "未知"}")
+        }
+    }
+
+    private fun durationMs(points: List<TrackPoint>): Long? {
+        val first = points.firstOrNull()?.timestampMs ?: return null
+        val last = points.lastOrNull()?.timestampMs ?: return null
+        return (last - first).coerceAtLeast(0L)
+    }
+
+    private fun formatDuration(durationMs: Long): String {
+        val seconds = durationMs / 1000
+        val minutes = seconds / 60
+        val remainSeconds = seconds % 60
+        return if (minutes > 0) "${minutes}分${remainSeconds}秒" else "${remainSeconds}秒"
+    }
 
     private fun fmt8(v: Double) = String.format(Locale.US, "%.8f", v)
     private fun fmt2(v: Double) = String.format(Locale.US, "%.2f", v)

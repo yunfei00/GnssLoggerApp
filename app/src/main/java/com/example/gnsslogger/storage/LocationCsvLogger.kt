@@ -25,7 +25,14 @@ class LocationCsvLogger(private val file: File) {
         }
     }
 
-    fun writeLocation(location: Location, scene: String = "default") {
+    fun writeLocation(
+        location: Location,
+        quality: String,
+        satelliteCount: Int,
+        usedInFixCount: Int,
+        averageCn0DbHz: Float?,
+        scene: String = "default",
+    ) {
         val tsMs = System.currentTimeMillis()
         val row = listOf(
             tsMs.toString(),
@@ -54,6 +61,10 @@ class LocationCsvLogger(private val file: File) {
             },
             location.elapsedRealtimeNanos.toString(),
             escapeCsv(scene),
+            escapeCsv(quality),
+            satelliteCount.toString(),
+            usedInFixCount.toString(),
+            averageCn0DbHz?.let { formatFloat(it) } ?: "",
         ).joinToString(",")
 
         writer?.apply {
@@ -79,7 +90,7 @@ class LocationCsvLogger(private val file: File) {
         const val HEADER =
             "timestamp_ms,timestamp_iso,provider,latitude,longitude,altitude_m,speed_mps,bearing_deg," +
                 "accuracy_m,vertical_accuracy_m,speed_accuracy_mps,bearing_accuracy_deg," +
-                "elapsed_realtime_nanos,scene"
+                "elapsed_realtime_nanos,scene,quality,satellite_count,used_in_fix_count,average_cn0_dbhz"
 
         private fun escapeCsv(value: String): String {
             val needsQuote = value.contains(',') || value.contains('"') || value.contains('\n') || value.contains('\r')

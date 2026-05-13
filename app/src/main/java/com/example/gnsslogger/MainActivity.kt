@@ -25,6 +25,7 @@ import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.example.gnsslogger.data.GnssRecordingPhase
 import com.example.gnsslogger.data.GnssSessionState
 import com.example.gnsslogger.data.LoggingUiStatus
 import com.example.gnsslogger.databinding.ActivityMainBinding
@@ -205,6 +206,14 @@ class MainActivity : AppCompatActivity() {
             binding.textExportStatus.visibility = View.VISIBLE
             binding.textExportStatus.text = exportStatus
         }
+        binding.textGnssStatus.text = buildGnssStatusText(state)
+        val sessionStats = buildSessionStatsText(state)
+        if (sessionStats.isNullOrBlank()) {
+            binding.textSessionStats.visibility = View.GONE
+        } else {
+            binding.textSessionStats.visibility = View.VISIBLE
+            binding.textSessionStats.text = sessionStats
+        }
         binding.textSatCounts.text = getString(
             R.string.label_counts,
             state.visibleSatelliteCount,
@@ -251,6 +260,60 @@ class MainActivity : AppCompatActivity() {
         "track.kml：${trackKmlStatus(state)}",
     )
 
+    private fun buildGnssStatusText(state: GnssSessionState): String =
+        buildList {
+            add("当前精度：${state.currentAccuracyM?.let { formatMeters(it) } ?: "--"}")
+            add("定位质量：${qualityLabel(state.currentAccuracyM)}")
+            add("可见卫星：${state.visibleSatelliteCount}")
+            add("参与定位：${state.usedInFixCount}")
+            add("平均 CN0：${state.averageCn0DbHz?.let { String.format(java.util.Locale.US, "%.1f dB-Hz", it) } ?: "--"}")
+            add("采集状态：${recordingPhaseLabel(state)}")
+            add("是否可以正式记录：${if (state.canStartFormalRecording || state.recordingPhase != GnssRecordingPhase.WARMING_UP) "是" else "否"}")
+            state.gnssFixWarning?.let { add(it) }
+            state.nmeaWarning?.let { add(it) }
+        }.joinToString(separator = "\n")
+
+    private fun buildSessionStatsText(state: GnssSessionState): String? {
+        if (state.status != LoggingUiStatus.STOPPED) return null
+        return buildList {
+            add("本次统计：")
+            add("采集时长：${formatDuration(state.recordingDurationMs)}")
+            add("轨迹点数量：${state.trackPointCount}")
+            add("平均精度：${state.averageAccuracyM?.let { formatMeters(it) } ?: "--"}")
+            add("最好精度：${state.bestAccuracyM?.let { formatMeters(it) } ?: "--"}")
+            add("最差精度：${state.worstAccuracyM?.let { formatMeters(it) } ?: "--"}")
+            add("KML：${if (state.kmlGenerated) "已生成" else "未生成"}")
+        }.joinToString(separator = "\n")
+    }
+
+    private fun qualityLabel(accuracyM: Float?): String =
+        when {
+            accuracyM == null || !accuracyM.isFinite() -> "--"
+            accuracyM <= 5f -> "优秀"
+            accuracyM <= 10f -> "良好"
+            accuracyM <= 20f -> "一般"
+            else -> "较差"
+        }
+
+    private fun recordingPhaseLabel(state: GnssSessionState): String =
+        when (state.recordingPhase) {
+            GnssRecordingPhase.WARMING_UP -> "预热中"
+            GnssRecordingPhase.RECORDING -> "正式记录中"
+            GnssRecordingPhase.POOR_ACCURACY -> "精度较差"
+            GnssRecordingPhase.STOPPED -> "已停止"
+            GnssRecordingPhase.IDLE -> "未启动"
+        }
+
+    private fun formatMeters(value: Float): String =
+        String.format(java.util.Locale.US, "%.1f m", value)
+
+    private fun formatDuration(durationMs: Long): String {
+        val seconds = (durationMs / 1000).coerceAtLeast(0L)
+        val minutes = seconds / 60
+        val remainSeconds = seconds % 60
+        return if (minutes > 0) "${minutes}分${remainSeconds}秒" else "${remainSeconds}秒"
+    }
+
     private fun generatedStatus(path: String?): String =
         if (path?.let(::isGeneratedFile) == true) "已生成" else "未生成"
 
@@ -265,6 +328,9 @@ class MainActivity : AppCompatActivity() {
             return null
         }
         return when {
+            state.lastError?.startsWith("KML 已生成") == true ->
+                "已生成 CSV 和 KML；有效轨迹点不足 2 个，KML 未生成轨迹线。"
+
             state.trackKmlPath?.let(::isGeneratedFile) == true ->
                 "已生成 CSV 和 KML，KML 可导入 Google Earth Pro。"
 
@@ -283,6 +349,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun isExportInfoMessage(message: String): Boolean =
         message.startsWith("已生成 CSV") ||
+            message.startsWith("KML 已生成") ||
             message.startsWith("track.kml 已生成") ||
             message.startsWith("track.kml：未生成") ||
             message.contains("没有有效经纬度")
