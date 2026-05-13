@@ -22,7 +22,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _ui.update { prev ->
                     prev.copy(
                         status = svc.status,
-                        sceneName = svc.sceneName,
                         csvPath = svc.csvPath,
                         rawCsvPath = svc.rawCsvPath,
                         nmeaCsvPath = svc.nmeaCsvPath,

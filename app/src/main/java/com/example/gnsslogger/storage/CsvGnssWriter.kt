@@ -40,7 +40,6 @@ class CsvGnssWriter(
         timestampMs: Long,
         elapsedRealtimeNanos: Long,
         sessionId: String,
-        sceneName: String,
         location: Location?,
         satelliteCount: Int,
         usedInFixCount: Int,
@@ -67,7 +66,6 @@ class CsvGnssWriter(
                     escapeCsv(androidVersion),
                     escapeCsv(packageVersion),
                     escapeCsv(sessionId),
-                    escapeCsv(sceneName),
                     escapeCsv(provider),
                     latStr,
                     lonStr,
@@ -102,7 +100,6 @@ class CsvGnssWriter(
         timestampMs: Long,
         elapsedRealtimeNanos: Long,
         sessionId: String,
-        sceneName: String,
         frame: RawGnssMeasurementsFrame,
     ): Long {
         synchronized(lock) {
@@ -117,7 +114,6 @@ class CsvGnssWriter(
                     timestampIso = tsIso,
                     elapsedRealtimeNanos = elapsedRealtimeNanos,
                     sessionId = sessionId,
-                    sceneName = sceneName,
                     clock = clock,
                     measurement = measurement,
                 ).joinToString(",")
@@ -134,7 +130,6 @@ class CsvGnssWriter(
         timestampMs: Long,
         elapsedRealtimeNanos: Long,
         sessionId: String,
-        sceneName: String,
         nmeaTimestampMs: Long,
         message: String,
     ): Long {
@@ -148,7 +143,6 @@ class CsvGnssWriter(
                 escapeCsv(androidVersion),
                 escapeCsv(packageVersion),
                 escapeCsv(sessionId),
-                escapeCsv(sceneName),
                 nmeaTimestampMs.toString(),
                 escapeCsv(message.trimEnd('\r', '\n')),
             ).joinToString(",")
@@ -202,7 +196,6 @@ class CsvGnssWriter(
         timestampIso: String,
         elapsedRealtimeNanos: Long,
         sessionId: String,
-        sceneName: String,
         clock: GnssClock,
         measurement: GnssMeasurement,
     ): List<String> = listOf(
@@ -213,7 +206,6 @@ class CsvGnssWriter(
         escapeCsv(androidVersion),
         escapeCsv(packageVersion),
         escapeCsv(sessionId),
-        escapeCsv(sceneName),
         clock.timeNanos.toString(),
         if (clock.hasFullBiasNanos()) clock.fullBiasNanos.toString() else "",
         if (clock.hasBiasNanos()) formatDouble(clock.biasNanos) else "",
@@ -256,14 +248,14 @@ class CsvGnssWriter(
     companion object {
         const val SATELLITE_HEADER =
             "timestamp_ms,timestamp_iso,elapsed_realtime_nanos,device_model,android_version," +
-                "package_version,session_id,scene_name,provider,latitude,longitude,altitude,accuracy," +
+                "package_version,session_id,provider,latitude,longitude,altitude,accuracy," +
                 "speed,bearing,satellite_count,used_in_fix_count,constellation_type,constellation_name," +
                 "svid,cn0_dbhz,elevation_deg,azimuth_deg,used_in_fix,carrier_frequency_hz," +
                 "baseband_cn0_dbhz,has_almanac,has_ephemeris"
 
         const val RAW_MEASUREMENTS_HEADER =
             "timestamp_ms,timestamp_iso,elapsed_realtime_nanos,device_model,android_version," +
-                "package_version,session_id,scene_name,clock_time_nanos,clock_full_bias_nanos," +
+                "package_version,session_id,clock_time_nanos,clock_full_bias_nanos," +
                 "clock_bias_nanos,clock_bias_uncertainty_nanos,clock_drift_nanos_per_second," +
                 "clock_drift_uncertainty_nanos_per_second,hardware_clock_discontinuity_count," +
                 "constellation_type,constellation_name,svid,time_offset_nanos,state,received_sv_time_nanos," +
@@ -274,7 +266,7 @@ class CsvGnssWriter(
 
         const val NMEA_HEADER =
             "timestamp_ms,timestamp_iso,elapsed_realtime_nanos,device_model,android_version," +
-                "package_version,session_id,scene_name,nmea_timestamp_ms,message"
+                "package_version,session_id,nmea_timestamp_ms,message"
 
         private fun escapeCsv(value: String): String {
             val needsQuote = value.contains(',') || value.contains('"') || value.contains('\n') || value.contains('\r')

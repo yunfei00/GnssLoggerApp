@@ -11,10 +11,8 @@
     <string name="action_stop">停止采集</string>
     <string name="action_open_dir">打开保存目录</string>
     <string name="action_share_csv">导出本次 CSV</string>
-    <string name="action_update_scene">更新场景标签</string>
     <string name="label_save_dir">保存目录</string>
     <string name="hint_filename_prefix">文件名前缀</string>
-    <string name="hint_scene_name">测试场景标签</string>
     <string name="switch_date_subdir">按日期创建子目录</string>
     <string name="switch_nmea">记录 NMEA 原始句子</string>
     <string name="switch_raw_measurements">记录 Raw GNSS Measurements</string>
@@ -22,7 +20,6 @@
     <string name="toast_permissions_required">请先授予所需权限</string>
     <string name="toast_open_dir_failed">无法打开目录，路径已显示在界面中</string>
     <string name="toast_no_csv_to_share">当前还没有可导出的 CSV 文件</string>
-    <string name="label_scene">当前场景：%1$s</string>
     <string name="label_csv">CSV 文件：%1$s</string>
     <string name="label_counts">可见卫星：%1$d，参与定位：%2$d，卫星行：%3$d，Raw 行：%4$d，NMEA 行：%5$d</string>
     <string name="label_last_update">最近更新：%1$s</string>

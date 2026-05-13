@@ -23,11 +23,6 @@
             android:paddingTop="8dp"
             android:text="@string/status_idle" />
 
-        <TextView
-            android:id="@+id/textScene"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingTop="4dp" />
 
         <TextView
             android:id="@+id/textCsvPath"
@@ -127,26 +122,7 @@
                 android:maxLines="1" />
         </com.google.android.material.textfield.TextInputLayout>
 
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:hint="@string/hint_scene_name">
 
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/inputScene"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="text"
-                android:maxLines="1" />
-        </com.google.android.material.textfield.TextInputLayout>
-
-        <Button
-            android:id="@+id/buttonUpdateScene"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/action_update_scene" />
 
         <com.google.android.material.materialswitch.MaterialSwitch
             android:id="@+id/switchDateSubdir"

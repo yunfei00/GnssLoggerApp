@@ -11,10 +11,6 @@ class GnssCommandReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         val appContext = context.applicationContext
         when (intent?.action) {
-            AppActions.ACTION_UPDATE_SCENE -> {
-                val scene = intent.getStringExtra(AppActions.EXTRA_SCENE_NAME)
-                GnssLoggerService.updateSceneName(appContext, scene)
-            }
 
             AppActions.ACTION_START_LOGGING -> {
                 val starter = Intent(appContext, GnssLoggerService::class.java)
