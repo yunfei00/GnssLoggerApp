@@ -79,16 +79,6 @@ class GnssLoggerService : Service() {
         super.onCreate()
         runningInstance = this
         NotificationHelper.ensureChannel(this)
-        val initialScene = getSharedPreferences(PREFS, MODE_PRIVATE)
-            .getString(KEY_SCENE, null)
-            ?.takeIf { it.isNotBlank() }
-            ?: "unknown_scene"
-        synchronized(sceneLock) {
-            currentSceneNameInternal = initialScene
-        }
-        _sessionState.update {
-            it.copy(sceneName = initialScene)
-        }
     }
 
     override fun onDestroy() {
@@ -134,7 +124,6 @@ class GnssLoggerService : Service() {
                     startForegroundWithType(
                         NotificationHelper.buildForegroundNotification(
                             this,
-                            currentSceneName(),
                             "正在启动…",
                             0L,
                         ),
@@ -150,10 +139,6 @@ class GnssLoggerService : Service() {
             }
 
             AppActions.ACTION_STOP_LOGGING -> stopLoggingFromIntent()
-            AppActions.ACTION_UPDATE_SCENE -> {
-                val name = intent.getStringExtra(AppActions.EXTRA_SCENE_NAME)
-                updateSceneName(applicationContext, name)
-            }
         }
         return if (isLogging) START_STICKY else START_NOT_STICKY
     }
@@ -245,7 +230,6 @@ class GnssLoggerService : Service() {
         lastNotifiedRecords = 0L
         val notification = NotificationHelper.buildForegroundNotification(
             this,
-            currentSceneName(),
             csvFileName,
             0L,
         )
@@ -259,7 +243,6 @@ class GnssLoggerService : Service() {
                 rawCsvPath = rawCsvPath,
                 nmeaCsvPath = nmeaCsvPath,
                 sessionDirectoryPath = sessionDirectoryPath,
-                sceneName = currentSceneName(),
                 recordsWritten = 0L,
                 rawRecordsWritten = 0L,
                 nmeaRecordsWritten = 0L,
@@ -274,7 +257,6 @@ class GnssLoggerService : Service() {
         val sid = sessionId ?: return
         val ts = System.currentTimeMillis()
         val elapsedNanos = SystemClock.elapsedRealtimeNanos()
-        val scene = currentSceneName()
         val loc = collector?.lastLocation
 
         enqueueCsvWrite {
@@ -286,7 +268,6 @@ class GnssLoggerService : Service() {
                         timestampMs = ts,
                         elapsedRealtimeNanos = elapsedNanos,
                         sessionId = sid,
-                        sceneName = scene,
                         location = loc,
                         satelliteCount = frame.visibleCount,
                         usedInFixCount = frame.usedInFixCount,
@@ -311,8 +292,7 @@ class GnssLoggerService : Service() {
                             rawCsvPath = rawCsvPath,
                             nmeaCsvPath = nmeaCsvPath,
                             sessionDirectoryPath = sessionDirectoryPath,
-                            sceneName = scene,
-                        )
+                            )
                     }
                 }
             } catch (e: Exception) {
@@ -329,7 +309,6 @@ class GnssLoggerService : Service() {
         if (frame.measurements.isEmpty()) return
         val ts = System.currentTimeMillis()
         val elapsedNanos = SystemClock.elapsedRealtimeNanos()
-        val scene = currentSceneName()
 
         enqueueCsvWrite {
             try {
@@ -337,14 +316,13 @@ class GnssLoggerService : Service() {
                     timestampMs = ts,
                     elapsedRealtimeNanos = elapsedNanos,
                     sessionId = sid,
-                    sceneName = scene,
                     frame = frame,
                 )
                 if (lines > 0) {
                     rawRecordsWritten.addAndGet(lines)
                     maybeRefreshNotification(totalRecordsWritten())
                 }
-                postWriteStats(scene)
+                postWriteStats()
             } catch (e: Exception) {
                 mainHandler.post {
                     publishError("写入 Raw GNSS CSV 失败: ${e.message}")
@@ -358,7 +336,6 @@ class GnssLoggerService : Service() {
         val sid = sessionId ?: return
         val ts = System.currentTimeMillis()
         val elapsedNanos = SystemClock.elapsedRealtimeNanos()
-        val scene = currentSceneName()
 
         enqueueCsvWrite {
             try {
@@ -366,7 +343,6 @@ class GnssLoggerService : Service() {
                     timestampMs = ts,
                     elapsedRealtimeNanos = elapsedNanos,
                     sessionId = sid,
-                    sceneName = scene,
                     nmeaTimestampMs = frame.nmeaTimestampMs,
                     message = frame.message,
                 )
@@ -374,7 +350,7 @@ class GnssLoggerService : Service() {
                     nmeaRecordsWritten.addAndGet(lines)
                     maybeRefreshNotification(totalRecordsWritten())
                 }
-                postWriteStats(scene)
+                postWriteStats()
             } catch (e: Exception) {
                 mainHandler.post {
                     publishError("写入 NMEA CSV 失败: ${e.message}")
@@ -383,7 +359,7 @@ class GnssLoggerService : Service() {
         }
     }
 
-    private fun postWriteStats(scene: String) {
+    private fun postWriteStats() {
         mainHandler.post {
             _sessionState.update { prev ->
                 prev.copy(
@@ -395,7 +371,6 @@ class GnssLoggerService : Service() {
                     rawCsvPath = rawCsvPath,
                     nmeaCsvPath = nmeaCsvPath,
                     sessionDirectoryPath = sessionDirectoryPath,
-                    sceneName = scene,
                 )
             }
         }
@@ -486,7 +461,6 @@ class GnssLoggerService : Service() {
         if (!isLogging) return
         val notification = NotificationHelper.buildForegroundNotification(
             this,
-            currentSceneName(),
             csvFileName,
             totalRecordsWritten(),
         )
@@ -501,14 +475,11 @@ class GnssLoggerService : Service() {
     companion object {
         const val NOTIFICATION_ID = 77001
         const val PREFS = "gnss_logger_prefs"
-        const val KEY_SCENE = "scene_name"
         const val KEY_PREFIX = "filename_prefix"
         const val KEY_DATE_SUBDIR = "use_date_subdir"
         const val KEY_NMEA = "record_nmea"
         const val KEY_RAW_MEASUREMENTS = "record_raw_measurements"
 
-        private val sceneLock = Any()
-        private var currentSceneNameInternal: String = "unknown_scene"
 
         private val _sessionState = MutableStateFlow(GnssSessionState())
         val sessionState: StateFlow<GnssSessionState> = _sessionState.asStateFlow()
@@ -516,20 +487,6 @@ class GnssLoggerService : Service() {
         @Volatile
         private var runningInstance: GnssLoggerService? = null
 
-        fun updateSceneName(context: Context, scene: String?) {
-            val name = if (scene.isNullOrBlank()) "unknown_scene" else scene
-            context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .edit()
-                .putString(KEY_SCENE, name)
-                .apply()
-            synchronized(sceneLock) {
-                currentSceneNameInternal = name
-            }
-            _sessionState.update { it.copy(sceneName = name) }
-            runningInstance?.updateForegroundNotification()
-        }
-
-        fun currentSceneName(): String = synchronized(sceneLock) { currentSceneNameInternal }
 
         fun readFilenamePrefix(context: Context): String =
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

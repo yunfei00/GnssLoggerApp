@@ -53,7 +53,6 @@
             <intent-filter>
                 <action android:name="com.example.gnsslogger.ACTION_START_LOGGING" />
                 <action android:name="com.example.gnsslogger.ACTION_STOP_LOGGING" />
-                <action android:name="com.example.gnsslogger.ACTION_UPDATE_SCENE" />
             </intent-filter>
         </receiver>
 

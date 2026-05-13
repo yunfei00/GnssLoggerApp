@@ -8,7 +8,6 @@ enum class LoggingUiStatus {
 
 data class GnssSessionState(
     val status: LoggingUiStatus = LoggingUiStatus.IDLE,
-    val sceneName: String = "unknown_scene",
     val csvPath: String? = null,
     val rawCsvPath: String? = null,
     val nmeaCsvPath: String? = null,

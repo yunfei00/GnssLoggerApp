@@ -92,7 +92,6 @@ class MainActivity : AppCompatActivity() {
         }
         binding.buttonOpenDir.setOnClickListener { openSaveDirectory() }
         binding.buttonShareCsv.setOnClickListener { shareCurrentCsvFiles() }
-        binding.buttonUpdateScene.setOnClickListener { updateSceneFromForm() }
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -108,9 +107,6 @@ class MainActivity : AppCompatActivity() {
         binding.inputPrefix.setText(
             p.getString(GnssLoggerService.KEY_PREFIX, "gnss_log") ?: "gnss_log",
         )
-        binding.inputScene.setText(
-            p.getString(GnssLoggerService.KEY_SCENE, "unknown_scene") ?: "unknown_scene",
-        )
         binding.switchDateSubdir.isChecked = p.getBoolean(GnssLoggerService.KEY_DATE_SUBDIR, true)
         binding.switchNmea.isChecked = p.getBoolean(GnssLoggerService.KEY_NMEA, true)
         binding.switchRaw.isChecked = p.getBoolean(GnssLoggerService.KEY_RAW_MEASUREMENTS, true)
@@ -123,10 +119,6 @@ class MainActivity : AppCompatActivity() {
             useDateSubdir = binding.switchDateSubdir.isChecked,
             recordNmea = binding.switchNmea.isChecked,
             recordRawMeasurements = binding.switchRaw.isChecked,
-        )
-        GnssLoggerService.updateSceneName(
-            applicationContext,
-            binding.inputScene.text?.toString()?.trim(),
         )
     }
 
@@ -177,10 +169,6 @@ class MainActivity : AppCompatActivity() {
             LoggingUiStatus.IDLE -> getString(R.string.status_idle)
             LoggingUiStatus.LOGGING -> getString(R.string.status_logging)
             LoggingUiStatus.STOPPED -> getString(R.string.status_stopped)
-        }
-        binding.textScene.text = getString(R.string.label_scene, state.sceneName)
-        if (!binding.inputScene.hasFocus()) {
-            binding.inputScene.setText(state.sceneName)
         }
         binding.textCsvPath.text = buildString {
             append(
@@ -325,8 +313,4 @@ class MainActivity : AppCompatActivity() {
         startActivity(Intent.createChooser(intent, getString(R.string.action_share_csv)))
     }
 
-    private fun updateSceneFromForm() {
-        val scene = binding.inputScene.text?.toString()?.trim()
-        GnssLoggerService.updateSceneName(applicationContext, scene)
-    }
 }

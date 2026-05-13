@@ -27,20 +27,18 @@ object NotificationHelper {
 
     fun buildForegroundNotification(
         context: Context,
-        sceneName: String,
         fileName: String?,
         recordCount: Long,
     ): Notification {
         ensureChannel(context)
         val text = buildString {
-            append("场景: ").append(sceneName)
-            append("\n文件: ").append(fileName ?: "-")
+            append("文件: ").append(fileName ?: "-")
             append("\n已写入行数: ").append(recordCount)
         }
         return NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentTitle("GNSS 采集中")
-            .setContentText("场景: $sceneName")
+.setContentText("GNSS 后台采集中")
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
