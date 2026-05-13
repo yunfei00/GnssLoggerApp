@@ -22,7 +22,6 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.gnsslogger.data.GnssSessionState
 import com.example.gnsslogger.data.LoggingUiStatus
 import com.example.gnsslogger.databinding.ActivityMainBinding
-import com.example.gnsslogger.storage.GoogleEarthKmlExporter
 import com.example.gnsslogger.storage.LogFileManager
 import com.example.gnsslogger.ui.MainViewModel
 import com.example.gnsslogger.ui.SatelliteTableAdapter
@@ -178,6 +177,8 @@ class MainActivity : AppCompatActivity() {
                         add("卫星=${state.csvPath ?: "-"}")
                         add("Raw=${state.rawCsvPath ?: "-"}")
                         add("NMEA=${state.nmeaCsvPath ?: "-"}")
+                        add("Location=${state.locationCsvPath ?: "-"}")
+                        add("Track KML=${state.trackKmlPath ?: "-"}")
                     }.joinToString(separator = "\n"),
                 ),
             )
@@ -273,6 +274,8 @@ class MainActivity : AppCompatActivity() {
             viewModel.uiState.value.csvPath,
             viewModel.uiState.value.rawCsvPath,
             viewModel.uiState.value.nmeaCsvPath,
+            viewModel.uiState.value.locationCsvPath,
+            viewModel.uiState.value.trackKmlPath,
         ).map(::File)
             .filter { it.exists() && it.isFile && it.length() > 0L }
 
@@ -281,20 +284,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val filesToShare = csvFiles.toMutableList()
-        val satelliteCsv = csvFiles.firstOrNull()
-        if (satelliteCsv != null) {
-            runCatching {
-                val kmlFile = File(cacheDir, "${satelliteCsv.nameWithoutExtension}.kml")
-                GoogleEarthKmlExporter.exportFromSatelliteCsv(satelliteCsv, kmlFile)
-                if (kmlFile.exists() && kmlFile.length() > 0L) {
-                    filesToShare.add(kmlFile)
-                }
-            }
-        }
-
         val uris = ArrayList<Uri>(
-            filesToShare.map { file ->
+            csvFiles.map { file ->
                 FileProvider.getUriForFile(
                     this,
                     "${packageName}.fileprovider",
@@ -305,7 +296,7 @@ class MainActivity : AppCompatActivity() {
         val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
             type = "*/*"
             putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
-            clipData = ClipData.newUri(contentResolver, filesToShare.first().name, uris.first()).apply {
+            clipData = ClipData.newUri(contentResolver, csvFiles.first().name, uris.first()).apply {
                 uris.drop(1).forEach { uri -> addItem(ClipData.Item(uri)) }
             }
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)

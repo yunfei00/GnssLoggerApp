@@ -39,6 +39,7 @@ class GnssCollector(
     private val onStatusFrame: (GnssStatusFrame) -> Unit,
     private val onNmeaMessage: (NmeaMessageFrame) -> Unit,
     private val onRawMeasurements: (RawGnssMeasurementsFrame) -> Unit,
+    private val onLocationUpdate: (Location) -> Unit,
 ) {
     private val appContext = context.applicationContext
     private val locationManager =
@@ -68,6 +69,7 @@ class GnssCollector(
 
     private val locationListener = LocationListener { location ->
         lastLocation = location
+        onLocationUpdate(location)
     }
 
     @Volatile

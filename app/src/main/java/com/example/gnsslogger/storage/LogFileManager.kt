@@ -12,10 +12,14 @@ data class SessionPaths(
     val satelliteCsvAbsolutePath: String,
     val rawCsvAbsolutePath: String,
     val nmeaCsvAbsolutePath: String,
+    val locationCsvAbsolutePath: String,
+    val trackKmlAbsolutePath: String,
     val directoryAbsolutePath: String,
     val satelliteCsvFileName: String,
     val rawCsvFileName: String,
     val nmeaCsvFileName: String,
+    val locationCsvFileName: String,
+    val trackKmlFileName: String,
 ) {
     val csvAbsolutePath: String
         get() = satelliteCsvAbsolutePath
@@ -43,15 +47,21 @@ class LogFileManager(private val context: Context) {
         val satelliteCsvFile = File(dir, "${safePrefix}_${ymdhms}_satellites.csv")
         val rawCsvFile = File(dir, "${safePrefix}_${ymdhms}_raw.csv")
         val nmeaCsvFile = File(dir, "${safePrefix}_${ymdhms}_nmea.csv")
+        val locationCsvFile = File(dir, "${safePrefix}_${ymdhms}_location.csv")
+        val trackKmlFile = File(dir, "${safePrefix}_${ymdhms}_track.kml")
         return SessionPaths(
             sessionId = sessionId,
             satelliteCsvAbsolutePath = satelliteCsvFile.absolutePath,
             rawCsvAbsolutePath = rawCsvFile.absolutePath,
             nmeaCsvAbsolutePath = nmeaCsvFile.absolutePath,
+            locationCsvAbsolutePath = locationCsvFile.absolutePath,
+            trackKmlAbsolutePath = trackKmlFile.absolutePath,
             directoryAbsolutePath = dir.absolutePath,
             satelliteCsvFileName = satelliteCsvFile.name,
             rawCsvFileName = rawCsvFile.name,
             nmeaCsvFileName = nmeaCsvFile.name,
+            locationCsvFileName = locationCsvFile.name,
+            trackKmlFileName = trackKmlFile.name,
         )
     }
 
