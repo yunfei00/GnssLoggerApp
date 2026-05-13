@@ -17,6 +17,7 @@ import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -503,6 +504,7 @@ class MainActivity : AppCompatActivity() {
         return relativePath
     }
 
+    @RequiresApi(Build.VERSION_CODES.Q)
     private fun saveFileToDownloadsWithMediaStore(source: File, relativePath: String) {
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, source.name)
