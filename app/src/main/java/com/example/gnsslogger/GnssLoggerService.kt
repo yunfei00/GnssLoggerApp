@@ -21,6 +21,8 @@ import com.example.gnsslogger.gnss.GnssStatusFrame
 import com.example.gnsslogger.gnss.NmeaMessageFrame
 import com.example.gnsslogger.gnss.RawGnssMeasurementsFrame
 import com.example.gnsslogger.storage.CsvGnssWriter
+import com.example.gnsslogger.storage.KmlExporter
+import com.example.gnsslogger.storage.LocationCsvLogger
 import com.example.gnsslogger.storage.LogFileManager
 import com.example.gnsslogger.util.DeviceInfo
 import com.example.gnsslogger.util.NotificationHelper
@@ -39,11 +41,14 @@ class GnssLoggerService : Service() {
     private var gnssThread: HandlerThread? = null
     private var collector: GnssCollector? = null
     private var csvWriter: CsvGnssWriter? = null
+    private var locationCsvLogger: LocationCsvLogger? = null
     private var sessionId: String? = null
     private var csvPath: String? = null
     private var rawCsvPath: String? = null
     private var nmeaCsvPath: String? = null
     private var sessionDirectoryPath: String? = null
+    private var locationCsvPath: String? = null
+    private var trackKmlPath: String? = null
     private var csvFileName: String? = null
     private var provisionalForeground = false
     private var recordNmea = true
@@ -194,6 +199,8 @@ class GnssLoggerService : Service() {
         csvPath = paths.satelliteCsvAbsolutePath
         rawCsvPath = if (recordRawMeasurements) paths.rawCsvAbsolutePath else null
         nmeaCsvPath = if (recordNmea) paths.nmeaCsvAbsolutePath else null
+        locationCsvPath = paths.locationCsvAbsolutePath
+        trackKmlPath = paths.trackKmlAbsolutePath
         sessionDirectoryPath = paths.directoryAbsolutePath
         csvFileName = paths.satelliteCsvFileName
 
@@ -207,6 +214,7 @@ class GnssLoggerService : Service() {
         )
         writer.open()
         csvWriter = writer
+        locationCsvLogger = LocationCsvLogger(java.io.File(paths.locationCsvAbsolutePath)).also { it.open() }
 
         val thread = HandlerThread("gnss-callbacks").apply { start() }
         gnssThread = thread
@@ -218,6 +226,7 @@ class GnssLoggerService : Service() {
             onStatusFrame = { frame -> onGnssFrame(frame) },
             onNmeaMessage = { frame -> onNmeaFrame(frame) },
             onRawMeasurements = { frame -> onRawMeasurementsFrame(frame) },
+            onLocationUpdate = { location -> onLocationUpdate(location) },
         )
         collector = collectorInstance
         collectorInstance.start()
@@ -243,6 +252,8 @@ class GnssLoggerService : Service() {
                 rawCsvPath = rawCsvPath,
                 nmeaCsvPath = nmeaCsvPath,
                 sessionDirectoryPath = sessionDirectoryPath,
+                locationCsvPath = locationCsvPath,
+                trackKmlPath = trackKmlPath,
                 recordsWritten = 0L,
                 rawRecordsWritten = 0L,
                 nmeaRecordsWritten = 0L,
@@ -292,6 +303,8 @@ class GnssLoggerService : Service() {
                             rawCsvPath = rawCsvPath,
                             nmeaCsvPath = nmeaCsvPath,
                             sessionDirectoryPath = sessionDirectoryPath,
+                locationCsvPath = locationCsvPath,
+                trackKmlPath = trackKmlPath,
                             )
                     }
                 }
@@ -299,6 +312,18 @@ class GnssLoggerService : Service() {
                 mainHandler.post {
                     publishError("写入 CSV 失败: ${e.message}")
                 }
+            }
+        }
+    }
+
+
+    private fun onLocationUpdate(location: android.location.Location) {
+        val logger = locationCsvLogger ?: return
+        enqueueCsvWrite {
+            try {
+                logger.writeLocation(location, scene = "default")
+            } catch (e: Exception) {
+                mainHandler.post { publishError("写入 location.csv 失败: ${e.message}") }
             }
         }
     }
@@ -370,6 +395,8 @@ class GnssLoggerService : Service() {
                     csvPath = csvPath,
                     rawCsvPath = rawCsvPath,
                     nmeaCsvPath = nmeaCsvPath,
+                    locationCsvPath = locationCsvPath,
+                    trackKmlPath = trackKmlPath,
                     sessionDirectoryPath = sessionDirectoryPath,
                 )
             }
@@ -408,9 +435,20 @@ class GnssLoggerService : Service() {
 
         try {
             csvWriter?.closeSafely()
+            locationCsvLogger?.closeSafely()
         } finally {
             csvWriter = null
+            locationCsvLogger = null
         }
+
+        val kmlMsg = runCatching {
+            val locationFile = locationCsvPath?.let(::java.io.File)
+            val kmlFile = trackKmlPath?.let(::java.io.File)
+            if (locationFile != null && kmlFile != null) {
+                KmlExporter.exportFromLocationCsv(locationFile, kmlFile)
+                "location.csv 已生成；track.kml 已生成；KML 可导入 Google Earth Pro"
+            } else null
+        }.getOrNull()
 
         _sessionState.update {
             it.copy(
@@ -418,7 +456,7 @@ class GnssLoggerService : Service() {
                 satellites = emptyList(),
                 visibleSatelliteCount = 0,
                 usedInFixCount = 0,
-                lastError = reason,
+                lastError = kmlMsg ?: reason,
                 recordsWritten = recordsWritten.get(),
                 rawRecordsWritten = rawRecordsWritten.get(),
                 nmeaRecordsWritten = nmeaRecordsWritten.get(),
@@ -426,6 +464,8 @@ class GnssLoggerService : Service() {
                 rawCsvPath = rawCsvPath,
                 nmeaCsvPath = nmeaCsvPath,
                 sessionDirectoryPath = sessionDirectoryPath,
+                locationCsvPath = locationCsvPath,
+                trackKmlPath = trackKmlPath,
             )
         }
         provisionalForeground = false

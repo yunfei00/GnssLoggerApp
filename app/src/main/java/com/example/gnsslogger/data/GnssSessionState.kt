@@ -11,6 +11,8 @@ data class GnssSessionState(
     val csvPath: String? = null,
     val rawCsvPath: String? = null,
     val nmeaCsvPath: String? = null,
+    val locationCsvPath: String? = null,
+    val trackKmlPath: String? = null,
     val sessionDirectoryPath: String? = null,
     val visibleSatelliteCount: Int = 0,
     val usedInFixCount: Int = 0,
