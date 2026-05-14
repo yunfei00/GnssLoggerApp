@@ -30,7 +30,11 @@ import com.example.gnsslogger.data.GnssRecordingPhase
 import com.example.gnsslogger.data.GnssSessionState
 import com.example.gnsslogger.data.LoggingUiStatus
 import com.example.gnsslogger.databinding.ActivityMainBinding
+import com.example.gnsslogger.storage.CleanupResult
+import com.example.gnsslogger.storage.CleanupScanResult
+import com.example.gnsslogger.storage.HistoryDataCleaner
 import com.example.gnsslogger.storage.KmlExporter
+import com.example.gnsslogger.storage.LogFileManager
 import com.example.gnsslogger.storage.NmeaExporter
 import com.example.gnsslogger.storage.NoValidNmeaSentencesException
 import com.example.gnsslogger.storage.NoValidTrackPointsException
@@ -43,6 +47,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
@@ -117,6 +122,7 @@ class MainActivity : AppCompatActivity() {
         }
         binding.buttonShareCsv.setOnClickListener { shareCurrentSessionData() }
         binding.buttonSaveDownloads.setOnClickListener { saveCurrentSessionDataToDownloads() }
+        binding.buttonCleanupHistory.setOnClickListener { confirmCleanupHistoryData() }
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -389,6 +395,123 @@ class MainActivity : AppCompatActivity() {
         }
         binding.recyclerSatellites.layoutParams = lp
     }
+
+    private fun confirmCleanupHistoryData() {
+        val state = viewModel.uiState.value
+        val serviceState = GnssLoggerService.sessionState.value
+        if (state.status == LoggingUiStatus.LOGGING || serviceState.status == LoggingUiStatus.LOGGING) {
+            Log.w(TAG, "History cleanup blocked because GNSS logging is active")
+            Toast.makeText(this, R.string.toast_cleanup_while_logging, Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        lifecycleScope.launch {
+            try {
+                Log.i(TAG, "Start scanning historical GNSS data")
+                val cleaner = withContext(Dispatchers.IO) { createHistoryDataCleaner() }
+                val scan = withContext(Dispatchers.IO) { cleaner.scan() }
+                Log.i(TAG, "Found ${scan.fileCount} cleanable files, ${scan.totalBytes} bytes")
+                if (scan.fileCount == 0) {
+                    Toast.makeText(this@MainActivity, R.string.toast_cleanup_empty, Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                showCleanupConfirmDialog(cleaner, scan)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to scan historical GNSS data", e)
+                Toast.makeText(
+                    this@MainActivity,
+                    getString(R.string.toast_cleanup_failed, e.message ?: e.javaClass.simpleName),
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
+    private fun showCleanupConfirmDialog(cleaner: HistoryDataCleaner, scan: CleanupScanResult) {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.dialog_cleanup_history_title)
+            .setMessage(
+                getString(
+                    R.string.dialog_cleanup_history_message,
+                    scan.fileCount,
+                    formatBytes(scan.totalBytes),
+                ),
+            )
+            .setNegativeButton(R.string.action_cancel, null)
+            .setPositiveButton(R.string.action_confirm_cleanup) { _, _ ->
+                cleanupHistoryData(cleaner)
+            }
+            .show()
+    }
+
+    private fun cleanupHistoryData(cleaner: HistoryDataCleaner) {
+        lifecycleScope.launch {
+            try {
+                Log.i(TAG, "Start deleting historical GNSS data")
+                val result = withContext(Dispatchers.IO) { cleaner.clean() }
+                logCleanupResult(result)
+                if (result.failedFiles.isEmpty()) {
+                    Toast.makeText(
+                        this@MainActivity,
+                        getString(
+                            R.string.toast_cleanup_done,
+                            result.deletedFileCount,
+                            formatBytes(result.freedBytes),
+                        ),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                } else {
+                    Toast.makeText(
+                        this@MainActivity,
+                        getString(
+                            R.string.toast_cleanup_partial_failed,
+                            result.deletedFileCount,
+                            formatBytes(result.freedBytes),
+                        ),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to delete historical GNSS data", e)
+                Toast.makeText(
+                    this@MainActivity,
+                    getString(R.string.toast_cleanup_failed, e.message ?: e.javaClass.simpleName),
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
+    private fun logCleanupResult(result: CleanupResult) {
+        Log.i(
+            TAG,
+            "History cleanup finished: deletedFiles=${result.deletedFileCount}, " +
+                "deletedDirs=${result.deletedDirCount}, freedBytes=${result.freedBytes}, " +
+                "failed=${result.failedFiles.size}",
+        )
+        result.failedFiles.forEach { failure ->
+            Log.w(TAG, "Failed to delete ${failure.path}: ${failure.reason}")
+        }
+    }
+
+    private fun createHistoryDataCleaner(): HistoryDataCleaner =
+        HistoryDataCleaner(roots = cleanupRoots())
+
+    @Suppress("DEPRECATION")
+    private fun cleanupRoots(): List<File> =
+        listOfNotNull(
+            LogFileManager(this).gnssRootDir(),
+            File(filesDir, "gnss"),
+            getExternalFilesDir("exports"),
+            File(filesDir, "exports"),
+            File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                "GnssLogger",
+            ),
+        ).distinctBy { it.absolutePath }
+
+    private fun formatBytes(bytes: Long): String =
+        String.format(Locale.US, "%.2f MB", bytes.coerceAtLeast(0L) / (1024.0 * 1024.0))
 
     private fun shareCurrentSessionData() {
         val state = viewModel.uiState.value

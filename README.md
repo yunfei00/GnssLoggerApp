@@ -35,6 +35,7 @@
 7. 停止采集后会生成 CSV、标准 NMEA 和 KML，并在界面显示 `location.csv`、`satellites.csv`、`standard.nmea`、`track.kml` 的生成状态和本次统计。
 8. 点击 **分享本次数据** 可通过系统分享面板把本次 CSV、标准 `*.nmea` 与 `*_track.kml` 发送到电脑或其它应用。
 9. 点击 **保存到下载目录** 可将本次文件复制到 `Download/GnssLogger/<session_name>/`。
+10. 点击 **清理历史数据** 可在二次确认后删除历史采集文件；采集中会禁止清理，避免误删正在写入的数据。
 
 CSV 默认目录（与 Android 应用专属外部目录一致）：
 

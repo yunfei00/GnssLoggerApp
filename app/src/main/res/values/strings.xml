@@ -12,6 +12,7 @@
     <string name="action_stop">停止采集</string>
     <string name="action_share_csv">分享本次数据</string>
     <string name="action_save_downloads">保存到下载目录</string>
+    <string name="action_cleanup_history">清理历史数据</string>
     <string name="hint_filename_prefix">文件名前缀</string>
     <string name="switch_date_subdir">按日期创建子目录</string>
     <string name="switch_nmea">记录 NMEA 原始句子</string>
@@ -25,6 +26,11 @@
     <string name="toast_share_failed">无法打开分享面板：%1$s</string>
     <string name="toast_saved_to_downloads">已保存到 %1$s</string>
     <string name="toast_save_downloads_failed">保存失败：%1$s</string>
+    <string name="toast_cleanup_while_logging">正在采集数据，请先停止采集后再清理历史数据。</string>
+    <string name="toast_cleanup_empty">暂无可清理的历史数据。</string>
+    <string name="toast_cleanup_done">历史数据清理完成，已删除 %1$d 个文件，释放 %2$s 空间。</string>
+    <string name="toast_cleanup_partial_failed">部分文件删除失败，请稍后重试。已删除 %1$d 个文件，释放 %2$s 空间。</string>
+    <string name="toast_cleanup_failed">清理失败：%1$s</string>
     <string name="toast_no_valid_location_for_kml">location.csv 没有有效经纬度数据，无法生成 KML</string>
     <string name="toast_kml_export_failed">KML 生成失败：%1$s</string>
     <string name="label_file_status">本次采集文件：%1$s</string>
@@ -33,6 +39,10 @@
     <string name="label_session">会话 ID：%1$s</string>
     <string name="dialog_bg_location_title">后台定位权限</string>
     <string name="dialog_bg_location_message">自动化长时间采集需要「始终允许」定位权限。请在下一步中选择「始终允许」，或稍后在系统设置中开启。</string>
+    <string name="dialog_cleanup_history_title">确认清理历史数据？</string>
+    <string name="dialog_cleanup_history_message">将删除本机已保存的历史 GPS 采集数据，包括 CSV、NMEA、KML、轨迹文件和历史会话目录。该操作不可恢复，当前正在采集的数据不会被删除。\n\n当前可清理：\n文件数量：%1$d\n占用空间：%2$s</string>
+    <string name="action_confirm_cleanup">确认清理</string>
+    <string name="action_cancel">取消</string>
     <string name="action_grant">去授权</string>
     <string name="action_skip">跳过</string>
 </resources>
