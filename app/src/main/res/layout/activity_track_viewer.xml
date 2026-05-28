@@ -41,13 +41,48 @@
             android:text="@string/action_reset_track_view" />
     </LinearLayout>
 
-    <com.example.gnsslogger.track.TrackCanvasView
-        android:id="@+id/trackCanvas"
+    <RadioGroup
+        android:id="@+id/displayModeGroup"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingTop="8dp">
+
+        <RadioButton
+            android:id="@+id/radioTrackCanvas"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:checked="true"
+            android:text="@string/display_mode_track_canvas" />
+
+        <RadioButton
+            android:id="@+id/radioTrackMap"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/display_mode_osm_map" />
+    </RadioGroup>
+
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_marginTop="8dp"
-        android:layout_weight="1"
-        android:contentDescription="@string/track_canvas_description" />
+        android:layout_weight="1">
+
+        <com.example.gnsslogger.track.TrackCanvasView
+            android:id="@+id/trackCanvas"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="@string/track_canvas_description" />
+
+        <org.osmdroid.views.MapView
+            android:id="@+id/osmMap"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="@string/track_map_description"
+            android:visibility="gone" />
+    </FrameLayout>
 
     <TextView
         android:layout_width="match_parent"

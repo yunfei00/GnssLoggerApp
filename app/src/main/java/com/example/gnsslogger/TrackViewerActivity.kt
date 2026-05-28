@@ -26,12 +26,19 @@ import com.example.gnsslogger.util.applySystemBarPadding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.osmdroid.config.Configuration
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.BoundingBox
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.Polyline
 import java.io.File
 
 class TrackViewerActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityTrackViewerBinding
     private val layers = mutableListOf<TrackLayer>()
+    private var displayMode = DisplayMode.CANVAS
 
     private val filePicker = registerForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments(),
@@ -45,14 +52,31 @@ class TrackViewerActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        configureOsmDroid()
         binding = ActivityTrackViewerBinding.inflate(layoutInflater)
         setContentView(binding.root)
         binding.root.applySystemBarPadding()
+        setupMap()
 
         binding.buttonLoadTrackFiles.setOnClickListener { openFilePicker() }
         binding.buttonResetTrackView.setOnClickListener {
-            binding.trackCanvas.resetViewport()
+            if (displayMode == DisplayMode.MAP) {
+                resetMapViewport()
+            } else {
+                binding.trackCanvas.resetViewport()
+            }
             Toast.makeText(this, R.string.toast_track_view_reset, Toast.LENGTH_SHORT).show()
+        }
+        binding.displayModeGroup.setOnCheckedChangeListener { _, checkedId ->
+            displayMode = if (checkedId == R.id.radioTrackMap) {
+                DisplayMode.MAP
+            } else {
+                DisplayMode.CANVAS
+            }
+            renderDisplayMode()
+            if (displayMode == DisplayMode.MAP) {
+                resetMapViewport()
+            }
         }
 
         render()
@@ -67,6 +91,20 @@ class TrackViewerActivity : AppCompatActivity() {
         if (intent.getBooleanExtra(EXTRA_OPEN_PICKER, false)) {
             openFilePicker()
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::binding.isInitialized) {
+            binding.osmMap.onResume()
+        }
+    }
+
+    override fun onPause() {
+        if (::binding.isInitialized) {
+            binding.osmMap.onPause()
+        }
+        super.onPause()
     }
 
     private fun openFilePicker() {
@@ -129,6 +167,9 @@ class TrackViewerActivity : AppCompatActivity() {
         }
         binding.trackCanvas.resetViewport()
         render()
+        if (displayMode == DisplayMode.MAP) {
+            resetMapViewport()
+        }
         Toast.makeText(
             this,
             getString(R.string.toast_track_files_loaded, validTracks.size),
@@ -145,8 +186,87 @@ class TrackViewerActivity : AppCompatActivity() {
                 visible = it.visible,
             )
         }
+        renderMapLayers()
+        renderDisplayMode()
         renderSummary()
         renderLayerList()
+    }
+
+    private fun renderDisplayMode() {
+        val showMap = displayMode == DisplayMode.MAP
+        binding.osmMap.visibility = if (showMap) View.VISIBLE else View.GONE
+        binding.trackCanvas.visibility = if (showMap) View.GONE else View.VISIBLE
+    }
+
+    private fun configureOsmDroid() {
+        val osmdroidDir = File(cacheDir, "osmdroid").apply { mkdirs() }
+        val tileDir = File(osmdroidDir, "tiles").apply { mkdirs() }
+        Configuration.getInstance().apply {
+            userAgentValue = packageName
+            osmdroidBasePath = osmdroidDir
+            osmdroidTileCache = tileDir
+        }
+    }
+
+    private fun setupMap() {
+        binding.osmMap.setTileSource(TileSourceFactory.MAPNIK)
+        binding.osmMap.setMultiTouchControls(true)
+        binding.osmMap.minZoomLevel = 2.0
+        binding.osmMap.maxZoomLevel = 22.0
+        binding.osmMap.controller.setZoom(3.0)
+        binding.osmMap.controller.setCenter(GeoPoint(0.0, 0.0))
+    }
+
+    private fun renderMapLayers() {
+        val map = binding.osmMap
+        map.overlays.clear()
+        layers.filter { it.visible && it.points.isNotEmpty() }.forEach { layer ->
+            val geoPoints = layer.points.map { GeoPoint(it.latitude, it.longitude) }
+            if (geoPoints.size >= 2) {
+                val line = Polyline(map).apply {
+                    title = layer.name
+                    outlinePaint.color = layer.color
+                    outlinePaint.strokeWidth = dp(4).toFloat()
+                    setPoints(geoPoints)
+                }
+                map.overlays.add(line)
+            }
+            geoPoints.firstOrNull()?.let { point ->
+                map.overlays.add(createMarker(point, "${layer.name} Start"))
+            }
+            geoPoints.lastOrNull()?.let { point ->
+                map.overlays.add(createMarker(point, "${layer.name} End"))
+            }
+        }
+        map.invalidate()
+    }
+
+    private fun createMarker(point: GeoPoint, title: String): Marker =
+        Marker(binding.osmMap).apply {
+            position = point
+            this.title = title
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+        }
+
+    private fun resetMapViewport() {
+        val geoPoints = layers.filter { it.visible }.flatMap { layer ->
+            layer.points.map { GeoPoint(it.latitude, it.longitude) }
+        }
+        if (geoPoints.isEmpty()) {
+            return
+        }
+        binding.osmMap.post {
+            if (geoPoints.size == 1) {
+                binding.osmMap.controller.setZoom(18.0)
+                binding.osmMap.controller.setCenter(geoPoints.first())
+            } else {
+                binding.osmMap.zoomToBoundingBox(
+                    BoundingBox.fromGeoPointsSafe(geoPoints),
+                    false,
+                    dp(48),
+                )
+            }
+        }
     }
 
     private fun renderSummary() {
@@ -223,6 +343,11 @@ class TrackViewerActivity : AppCompatActivity() {
         val color: Int,
         val visible: Boolean,
     )
+
+    private enum class DisplayMode {
+        CANVAS,
+        MAP,
+    }
 
     companion object {
         const val EXTRA_FILE_PATHS = "com.example.gnsslogger.extra.FILE_PATHS"

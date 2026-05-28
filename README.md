@@ -23,6 +23,7 @@
 | `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_LOCATION` | 前台服务（含定位类型，Android 10+） |
 | `POST_NOTIFICATIONS` | 通知栏展示采集状态（Android 13+） |
 | `WRITE_EXTERNAL_STORAGE` | 仅 `maxSdkVersion=28` 声明，兼容 Android 9 及以下保存到公共下载目录；Android 10+ 通过 MediaStore 保存 |
+| `INTERNET` / `ACCESS_NETWORK_STATE` | 轨迹地图模式加载 OpenStreetMap 瓦片 |
 
 ## 手动使用
 
@@ -33,9 +34,11 @@
 5. 当 `accuracy_m <= 20m` 时自动进入正式记录；如果 30 秒仍未达标，会继续记录并提示当前精度较差。
 6. 点击 **停止采集**：关闭写入并结束前台服务；下次开始会生成新的 `session_id` 与新 CSV 文件。
 7. 停止采集后会生成 CSV、标准 NMEA 和 KML，并在界面显示 `location.csv`、`satellites.csv`、`standard.nmea`、`track.kml` 的生成状态和本次统计。
-8. 点击 **分享本次数据** 可通过系统分享面板把本次 CSV、标准 `*.nmea` 与 `*_track.kml` 发送到电脑或其它应用。
-9. 点击 **保存到下载目录** 可将本次文件复制到 `Download/GnssLogger/<session_name>/`。
-10. 点击 **清理历史数据** 可在二次确认后删除历史采集文件；采集中会禁止清理，避免误删正在写入的数据。
+8. 点击 **查看本次轨迹** 可在 App 内查看本次轨迹；轨迹查看页支持自绘 **轨迹图** 与基于 osmdroid/OpenStreetMap 的 **地图** 两种模式。
+9. 点击 **加载轨迹文件** 可同时加载多个 `*_location.csv` 或 `*_track.kml`，用于对比多条运动轨迹。
+10. 点击 **分享本次数据** 可通过系统分享面板把本次 CSV、标准 `*.nmea` 与 `*_track.kml` 发送到电脑或其它应用。
+11. 点击 **保存到下载目录** 可将本次文件复制到 `Download/GnssLogger/<session_name>/`。
+12. 点击 **清理历史数据** 可在二次确认后删除历史采集文件；采集中会禁止清理，避免误删正在写入的数据。
 
 CSV 默认目录（与 Android 应用专属外部目录一致）：
 
@@ -104,6 +107,18 @@ adb shell am broadcast -n com.example.gnsslogger/com.example.gnsslogger.GnssComm
 `Download/GnssLogger/<session_name>/`
 
 `*_track.kml` 可直接用 Google Earth Pro 打开，导入方式为：**文件 -> 打开 -> 选择 `*_track.kml`**。
+
+## 轨迹查看
+
+App 内置轨迹查看页，支持两类数据源：
+
+- `*_location.csv`：直接读取定位轨迹点，并展示点数、距离、平均精度等摘要。
+- `*_track.kml`：读取 Google Earth Pro 轨迹文件中的坐标点。
+
+轨迹查看页可以一次加载多个文件，每个文件作为一个图层显示，可单独勾选显示/隐藏。显示模式包括：
+
+- **轨迹图**：离线自绘轨迹，不依赖网络，适合快速确认轨迹形状。
+- **地图**：基于 osmdroid + OpenStreetMap 显示轨迹、起点和终点，适合结合道路和地理背景查看。
 
 ## 定位质量判断
 

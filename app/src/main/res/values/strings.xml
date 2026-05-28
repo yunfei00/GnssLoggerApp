@@ -59,4 +59,7 @@
     <string name="section_track_layers">轨迹图层</string>
     <string name="track_layer_details">%1$s，点数：%2$d，距离：%3$s，平均精度：%4$s</string>
     <string name="track_canvas_description">运动轨迹预览</string>
+    <string name="display_mode_track_canvas">轨迹图</string>
+    <string name="display_mode_osm_map">地图</string>
+    <string name="track_map_description">OpenStreetMap 轨迹地图</string>
 </resources>
