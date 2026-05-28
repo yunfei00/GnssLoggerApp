@@ -52,17 +52,39 @@ jobs:
       - name: Build and test
         run: ./gradlew --no-daemon :app:lintDebug :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease
 
+      - name: Prepare named APK files
+        run: |
+          SAFE_REF_NAME="${GITHUB_REF_NAME//\//-}"
+          APK_OUTPUT_DIR="$RUNNER_TEMP/gnss-logger-apks"
+          mkdir -p "$APK_OUTPUT_DIR"
+
+          DEBUG_APK="$(find app/build/outputs/apk/debug -type f -name "*.apk" | sort | head -n 1)"
+          if [ -n "$DEBUG_APK" ]; then
+            cp "$DEBUG_APK" "$APK_OUTPUT_DIR/GnssLoggerApp-${SAFE_REF_NAME}-debug.apk"
+          fi
+
+          RELEASE_APK="$(find app/build/outputs/apk/release -type f -name "*.apk" | sort | head -n 1)"
+          if [ -n "$RELEASE_APK" ]; then
+            RELEASE_KIND="release"
+            if [[ "$RELEASE_APK" == *unsigned* ]]; then
+              RELEASE_KIND="release-unsigned"
+            fi
+            cp "$RELEASE_APK" "$APK_OUTPUT_DIR/GnssLoggerApp-${SAFE_REF_NAME}-${RELEASE_KIND}.apk"
+          fi
+
+          ls -la "$APK_OUTPUT_DIR"
+
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: gnss-logger-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: ${{ runner.temp }}/gnss-logger-apks/*-debug.apk
 
       - name: Upload release APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: gnss-logger-release-apk
-          path: app/build/outputs/apk/release/*.apk
+          path: ${{ runner.temp }}/gnss-logger-apks/*-release*.apk
 
       - name: Publish GitHub release
         if: startsWith(github.ref, 'refs/tags/')
@@ -70,7 +92,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
         run: |
-          mapfile -t APK_FILES < <(find app/build/outputs/apk -type f -name "*.apk" | sort)
+          mapfile -t APK_FILES < <(find "$RUNNER_TEMP/gnss-logger-apks" -type f -name "*.apk" | sort)
           if [ "${#APK_FILES[@]}" -eq 0 ]; then
             echo "No APK files found to publish." >&2
             exit 1
