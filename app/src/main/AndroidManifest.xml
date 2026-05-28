@@ -40,6 +40,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".TrackViewerActivity"
+            android:exported="true"
+            android:label="@string/track_viewer_title" />
+
         <service
             android:name=".GnssLoggerService"
             android:exported="false"

@@ -45,4 +45,18 @@
     <string name="action_cancel">取消</string>
     <string name="action_grant">去授权</string>
     <string name="action_skip">跳过</string>
+    <string name="action_view_current_track">查看本次轨迹</string>
+    <string name="action_load_track_files">加载轨迹文件</string>
+    <string name="action_reset_track_view">重置视图</string>
+    <string name="toast_no_track_to_view">暂无可查看的轨迹文件，请先完成一次有效采集。</string>
+    <string name="toast_no_track_file_selected">未选择轨迹文件。</string>
+    <string name="toast_no_valid_track_points">未发现有效经纬度点。</string>
+    <string name="toast_track_files_loaded">已加载 %1$d 个轨迹文件。</string>
+    <string name="toast_track_view_reset">轨迹视图已重置。</string>
+    <string name="track_viewer_title">轨迹查看</string>
+    <string name="track_empty_hint">可加载 *_location.csv 或 *_track.kml，支持多个轨迹叠加显示。</string>
+    <string name="track_summary">轨迹：%1$d 条，可见：%2$d 条，点数：%3$d，距离：%4$s</string>
+    <string name="section_track_layers">轨迹图层</string>
+    <string name="track_layer_details">%1$s，点数：%2$d，距离：%3$s，平均精度：%4$s</string>
+    <string name="track_canvas_description">运动轨迹预览</string>
 </resources>

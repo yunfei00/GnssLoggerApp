@@ -116,6 +116,20 @@
             android:text="@string/action_save_downloads" />
 
         <Button
+            android:id="@+id/buttonViewCurrentTrack"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/action_view_current_track" />
+
+        <Button
+            android:id="@+id/buttonLoadTrackFiles"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/action_load_track_files" />
+
+        <Button
             android:id="@+id/buttonCleanupHistory"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

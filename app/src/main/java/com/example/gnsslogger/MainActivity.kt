@@ -41,6 +41,7 @@ import com.example.gnsslogger.storage.NoValidTrackPointsException
 import com.example.gnsslogger.ui.MainViewModel
 import com.example.gnsslogger.ui.SatelliteTableAdapter
 import com.example.gnsslogger.util.PermissionHelper
+import com.example.gnsslogger.util.applySystemBarPadding
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -103,6 +104,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        binding.root.applySystemBarPadding()
 
         binding.recyclerSatellites.layoutManager = LinearLayoutManager(this)
         binding.recyclerSatellites.adapter = adapter
@@ -122,6 +124,8 @@ class MainActivity : AppCompatActivity() {
         }
         binding.buttonShareCsv.setOnClickListener { shareCurrentSessionData() }
         binding.buttonSaveDownloads.setOnClickListener { saveCurrentSessionDataToDownloads() }
+        binding.buttonViewCurrentTrack.setOnClickListener { viewCurrentTrack() }
+        binding.buttonLoadTrackFiles.setOnClickListener { openTrackViewerPicker() }
         binding.buttonCleanupHistory.setOnClickListener { confirmCleanupHistoryData() }
 
         lifecycleScope.launch {
@@ -512,6 +516,38 @@ class MainActivity : AppCompatActivity() {
 
     private fun formatBytes(bytes: Long): String =
         String.format(Locale.US, "%.2f MB", bytes.coerceAtLeast(0L) / (1024.0 * 1024.0))
+
+    private fun viewCurrentTrack() {
+        val state = viewModel.uiState.value
+        val files = listOfNotNull(
+            state.locationCsvPath?.let(::File),
+            state.trackKmlPath?.let(::File),
+        )
+            .filter(::isShareableFile)
+            .distinctBy { it.absolutePath }
+
+        if (files.isEmpty()) {
+            Toast.makeText(this, R.string.toast_no_track_to_view, Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        startActivity(
+            Intent(this, TrackViewerActivity::class.java).apply {
+                putStringArrayListExtra(
+                    TrackViewerActivity.EXTRA_FILE_PATHS,
+                    ArrayList(files.map { it.absolutePath }),
+                )
+            },
+        )
+    }
+
+    private fun openTrackViewerPicker() {
+        startActivity(
+            Intent(this, TrackViewerActivity::class.java).apply {
+                putExtra(TrackViewerActivity.EXTRA_OPEN_PICKER, true)
+            },
+        )
+    }
 
     private fun shareCurrentSessionData() {
         val state = viewModel.uiState.value
