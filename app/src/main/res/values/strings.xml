@@ -58,6 +58,9 @@
     <string name="track_summary">轨迹：%1$d 条，可见：%2$d 条，点数：%3$d，距离：%4$s</string>
     <string name="section_track_layers">轨迹图层</string>
     <string name="track_layer_details">%1$s，点数：%2$d，距离：%3$s，平均精度：%4$s</string>
+    <string name="track_layer_offset_reference">偏移基准：第一条轨迹</string>
+    <string name="track_layer_offset_details">相对首条：平均偏移：%1$s，P95 偏移：%2$s，最大偏移：%3$s</string>
+    <string name="track_layer_offset_unavailable">相对首条：轨迹点不足，无法计算偏移</string>
     <string name="track_canvas_description">运动轨迹预览</string>
     <string name="display_mode_track_canvas">轨迹图</string>
     <string name="display_mode_osm_map">地图</string>

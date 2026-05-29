@@ -19,8 +19,10 @@ import com.example.gnsslogger.track.ParsedTrack
 import com.example.gnsslogger.track.TrackCanvasView
 import com.example.gnsslogger.track.TrackFileParser
 import com.example.gnsslogger.track.TrackPoint
+import com.example.gnsslogger.track.calculateTrackOffsetStats
 import com.example.gnsslogger.track.formatTrackAccuracy
 import com.example.gnsslogger.track.formatTrackDistance
+import com.example.gnsslogger.track.formatTrackOffset
 import com.example.gnsslogger.track.trackStats
 import com.example.gnsslogger.util.applySystemBarPadding
 import kotlinx.coroutines.Dispatchers
@@ -292,6 +294,7 @@ class TrackViewerActivity : AppCompatActivity() {
 
     private fun createLayerRow(index: Int, layer: TrackLayer): View {
         val stats = layer.points.trackStats()
+        val offsetSummary = trackOffsetSummary(index, layer)
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(8), 0, dp(8))
@@ -315,9 +318,30 @@ class TrackViewerActivity : AppCompatActivity() {
             )
             textSize = 13f
         }
+        val offsetDetails = TextView(this).apply {
+            text = offsetSummary
+            textSize = 13f
+        }
         row.addView(checkBox)
         row.addView(details)
+        row.addView(offsetDetails)
         return row
+    }
+
+    private fun trackOffsetSummary(index: Int, layer: TrackLayer): String {
+        if (index == 0) {
+            return getString(R.string.track_layer_offset_reference)
+        }
+
+        val reference = layers.firstOrNull()?.points.orEmpty()
+        val offsetStats = calculateTrackOffsetStats(reference, layer.points)
+            ?: return getString(R.string.track_layer_offset_unavailable)
+        return getString(
+            R.string.track_layer_offset_details,
+            formatTrackOffset(offsetStats.averageOffsetMeters),
+            formatTrackOffset(offsetStats.p95OffsetMeters),
+            formatTrackOffset(offsetStats.maxOffsetMeters),
+        )
     }
 
     private fun displayNameFor(uri: Uri): String {
