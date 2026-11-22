@@ -260,10 +260,8 @@ class MainActivity : AppCompatActivity() {
                     buildFileStatusLines(state).joinToString(separator = "\n"),
                 ),
             )
-            if (state.sessionId != null) {
-                append('\n')
-                append(getString(R.string.label_session, state.sessionId))
-            }
+            append('\n')
+            append(getString(R.string.label_session, state.sessionId))
         }
         val exportStatus = buildExportStatusText(state)
         if (exportStatus.isNullOrBlank()) {
