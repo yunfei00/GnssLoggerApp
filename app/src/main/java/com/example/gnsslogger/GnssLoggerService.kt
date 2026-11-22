@@ -35,6 +35,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import java.io.File
+import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
@@ -42,7 +44,10 @@ import java.util.concurrent.atomic.AtomicLong
 
 class GnssLoggerService : Service() {
 
-    private var isLogging = false
+    @Volatile private var isLogging = false
+    private var testRun: LoggerRun? = null
+    private var testCollectNmea = false
+    @Volatile private var testWriteFailed = false
     private var gnssThread: HandlerThread? = null
     private var collector: GnssCollector? = null
     private var csvWriter: CsvGnssWriter? = null
@@ -151,7 +156,15 @@ class GnssLoggerService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             AppActions.ACTION_START_LOGGING -> {
+                val requested = intent.getStringExtra("test_run_id")?.let { LoggerRun(this, it) }
+                if (requested != null && isLogging && testRun?.id != requested.id) {
+                    requested.transition("ERROR", reason = "LOGGER_BUSY")
+                    return START_NOT_STICKY
+                }
                 if (!isLogging) {
+                    testRun = requested
+                    testCollectNmea = intent.getBooleanExtra("test_collect_nmea", false)
+                    testWriteFailed = false
                     NotificationHelper.ensureChannel(this)
                     startForegroundWithType(
                         NotificationHelper.buildForegroundNotification(
@@ -163,6 +176,7 @@ class GnssLoggerService : Service() {
                     provisionalForeground = true
                 }
                 startLoggingFromIntent()
+                if (isLogging && requested != null) requested.transition("STARTED", sessionId)
                 if (!isLogging && provisionalForeground) {
                     provisionalForeground = false
                     stopForegroundStopCompat()
@@ -170,9 +184,9 @@ class GnssLoggerService : Service() {
                 }
             }
 
-            AppActions.ACTION_STOP_LOGGING -> stopLoggingFromIntent()
+            AppActions.ACTION_STOP_LOGGING -> if (testRun == null) stopLoggingFromIntent()
         }
-        return if (isLogging) START_STICKY else START_NOT_STICKY
+        return if (isLogging && testRun == null) START_STICKY else START_NOT_STICKY
     }
 
     private fun startLoggingFromIntent() {
@@ -221,19 +235,34 @@ class GnssLoggerService : Service() {
         val useDate = readUseDateSubdir(this)
         recordNmea = readRecordNmea(this)
         recordRawMeasurements = readRecordRawMeasurements(this)
-        val paths = LogFileManager(this).createNewSession(prefix, useDate)
-        sessionId = paths.sessionId
-        csvPath = paths.satelliteCsvAbsolutePath
-        rawCsvPath = if (recordRawMeasurements) paths.rawCsvAbsolutePath else null
-        nmeaCsvPath = if (recordNmea) paths.nmeaCsvAbsolutePath else null
-        nmeaTextPath = if (recordNmea) paths.nmeaTextAbsolutePath else null
-        locationCsvPath = paths.locationCsvAbsolutePath
-        trackKmlPath = paths.trackKmlAbsolutePath
-        sessionDirectoryPath = paths.directoryAbsolutePath
-        csvFileName = paths.satelliteCsvFileName
+        val run = testRun
+        if (run == null) {
+            val paths = LogFileManager(this).createNewSession(prefix, useDate)
+            sessionId = paths.sessionId
+            csvPath = paths.satelliteCsvAbsolutePath
+            rawCsvPath = if (recordRawMeasurements) paths.rawCsvAbsolutePath else null
+            nmeaCsvPath = if (recordNmea) paths.nmeaCsvAbsolutePath else null
+            nmeaTextPath = if (recordNmea) paths.nmeaTextAbsolutePath else null
+            locationCsvPath = paths.locationCsvAbsolutePath
+            trackKmlPath = paths.trackKmlAbsolutePath
+            sessionDirectoryPath = paths.directoryAbsolutePath
+            csvFileName = paths.satelliteCsvFileName
+        } else {
+            sessionId = UUID.randomUUID().toString()
+            recordRawMeasurements = true
+            recordNmea = testCollectNmea
+            csvPath = File(run.directory, "satellites.csv").absolutePath
+            rawCsvPath = File(run.directory, "raw.csv").absolutePath
+            nmeaCsvPath = if (recordNmea) File(run.directory, "nmea.csv").absolutePath else null
+            nmeaTextPath = if (recordNmea) File(run.directory, "standard.nmea").absolutePath else null
+            locationCsvPath = null
+            trackKmlPath = null
+            sessionDirectoryPath = run.directory.absolutePath
+            csvFileName = "satellites.csv"
+        }
 
         val writer = CsvGnssWriter(
-            satelliteFile = java.io.File(paths.satelliteCsvAbsolutePath),
+            satelliteFile = File(requireNotNull(csvPath)),
             rawMeasurementsFile = rawCsvPath?.let { java.io.File(it) },
             nmeaFile = nmeaCsvPath?.let { java.io.File(it) },
             deviceModel = DeviceInfo.model(),
@@ -242,10 +271,11 @@ class GnssLoggerService : Service() {
         )
         writer.open()
         csvWriter = writer
-        locationCsvLogger = LocationCsvLogger(java.io.File(paths.locationCsvAbsolutePath)).also { it.open() }
+        locationCsvLogger = locationCsvPath?.let { LocationCsvLogger(File(it)).also { logger -> logger.open() } }
         resetQualityState()
         recordingPhase = GnssRecordingPhase.WARMING_UP
         warmupStartedElapsedMs = SystemClock.elapsedRealtime()
+        if (run != null) beginFormalRecording(poorAccuracy = false)
         recordsWritten.set(0L)
         rawRecordsWritten.set(0L)
         nmeaRecordsWritten.set(0L)
@@ -338,7 +368,7 @@ class GnssLoggerService : Service() {
         val sid = sessionId ?: return
         val ts = System.currentTimeMillis()
         val elapsedNanos = SystemClock.elapsedRealtimeNanos()
-        val loc = collector?.lastLocation
+        val loc = if (testRun == null) collector?.lastLocation else null
         latestVisibleSatelliteCount = frame.visibleCount
         latestUsedInFixCount = frame.usedInFixCount
         latestAverageCn0DbHz = averageCn0(frame)
@@ -402,6 +432,7 @@ class GnssLoggerService : Service() {
                     }
                 }
             } catch (e: Exception) {
+                if (testRun != null) testWriteFailed = true
                 mainHandler.post {
                     publishError("写入 CSV 失败: ${e.message}")
                 }
@@ -495,6 +526,7 @@ class GnssLoggerService : Service() {
                 updateLocationStats(accuracy)
                 postWriteStats()
             } catch (e: Exception) {
+                if (testRun != null) testWriteFailed = true
                 mainHandler.post { publishError("写入 location.csv 失败: ${e.message}") }
             }
         }
@@ -558,6 +590,7 @@ class GnssLoggerService : Service() {
                 }
                 postWriteStats()
             } catch (e: Exception) {
+                if (testRun != null) testWriteFailed = true
                 mainHandler.post {
                     publishError("写入 Raw GNSS CSV 失败: ${e.message}")
                 }
@@ -590,6 +623,7 @@ class GnssLoggerService : Service() {
                 }
                 postWriteStats()
             } catch (e: Exception) {
+                if (testRun != null) testWriteFailed = true
                 mainHandler.post {
                     publishError("写入 NMEA CSV 失败: ${e.message}")
                 }
@@ -720,12 +754,15 @@ class GnssLoggerService : Service() {
         gnssThread?.quitSafely()
         gnssThread = null
 
+        testRun?.transition("STOPPING")
         csvExecutor.shutdown()
         try {
             if (!csvExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                testWriteFailed = true
                 csvExecutor.shutdownNow()
             }
         } catch (_: InterruptedException) {
+            testWriteFailed = true
             csvExecutor.shutdownNow()
         }
 
@@ -738,6 +775,14 @@ class GnssLoggerService : Service() {
         }
 
         val nmeaMsg = exportStandardNmeaOnStop()
+        testRun?.let { run ->
+            when {
+                reason != null -> run.transition("INTERRUPTED", reason = "SERVICE_DESTROYED")
+                testWriteFailed -> run.transition("ERROR", reason = "CSV_WRITE_FAILED")
+                else -> run.transition("STOPPED")
+            }
+        }
+        testRun = null
         val kmlMsg = exportTrackKmlOnStop()
         val stopMessage = listOfNotNull(nmeaMsg, kmlMsg, reason)
             .joinToString(separator = "\n")
@@ -861,6 +906,10 @@ class GnssLoggerService : Service() {
     }
 
     private fun publishError(msg: String) {
+        testRun?.let {
+            testWriteFailed = true
+            if (!isLogging) it.transition("ERROR", reason = "LOGGER_START_FAILED")
+        }
         _sessionState.update { it.copy(lastError = msg) }
     }
 
@@ -883,6 +932,10 @@ class GnssLoggerService : Service() {
 
         @Volatile
         private var runningInstance: GnssLoggerService? = null
+        internal fun activeTestRun(): String? = runningInstance?.testRun?.id
+        internal fun stopTestRun(id: String) {
+            runningInstance?.takeIf { it.testRun?.id == id }?.stopLoggingFromIntent()
+        }
 
 
         fun readFilenamePrefix(context: Context): String =

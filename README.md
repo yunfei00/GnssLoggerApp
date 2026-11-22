@@ -11,7 +11,7 @@
 - `GnssMeasurementsEvent.Callback` 记录 Raw GNSS Measurements。
 - 高精度 1 秒定位请求，启动后先预热，精度达标后再正式写入轨迹点。
 - 实时 `flush` 的多 CSV 写入，降低异常退出时的数据丢失。
-- 广播：`ACTION_START_LOGGING` / `ACTION_STOP_LOGGING` / `ACTION_UPDATE_SCENE`。
+- 广播：`ACTION_START_LOGGING` / `ACTION_STOP_LOGGING`。
 - 主界面展示状态、场景、GNSS 精度、Fix 状态、NMEA 完整性、文件生成状态、卫星表格、写入计数、分享/保存入口与配置项。
 
 ## 权限说明
@@ -30,7 +30,7 @@
 1. 安装 APK 后打开应用，授予通知（若系统要求）、定位及（建议）后台定位。
 2. 设置文件名前缀、测试场景标签、是否按日期建子目录，以及是否记录 NMEA / Raw GNSS。
 3. 点击 **开始采集**：出现前台通知后进入预热状态；可退回桌面或锁屏继续采集。
-4. 采集中可随时修改测试场景标签，后续 CSV 行会写入新的 `scene_name`。
+4. PC 测试场景边界通过协议 v1 写入 events.jsonl。
 5. 当 `accuracy_m <= 20m` 时自动进入正式记录；如果 30 秒仍未达标，会继续记录并提示当前精度较差。
 6. 点击 **停止采集**：关闭写入并结束前台服务；下次开始会生成新的 `session_id` 与新 CSV 文件。
 7. 停止采集后会生成 CSV、标准 NMEA 和 KML，并在界面显示 `location.csv`、`satellites.csv`、`standard.nmea`、`track.kml` 的生成状态和本次统计。
@@ -59,7 +59,6 @@ adb shell am broadcast -n com.example.gnsslogger/com.example.gnsslogger.GnssComm
 ```
 
 ```text
-adb shell am broadcast -n com.example.gnsslogger/com.example.gnsslogger.GnssCommandReceiver -a com.example.gnsslogger.ACTION_UPDATE_SCENE --es scene_name "stopwatch_scene"
 ```
 
 ### 备选：限定包名的隐式广播
@@ -73,16 +72,14 @@ adb shell am broadcast -p com.example.gnsslogger -a com.example.gnsslogger.ACTIO
 ```
 
 ```text
-adb shell am broadcast -p com.example.gnsslogger -a com.example.gnsslogger.ACTION_UPDATE_SCENE --es scene_name "white_screen_scene"
 ```
 
 ### 场景名称示例
 
 ```text
-adb shell am broadcast -n com.example.gnsslogger/com.example.gnsslogger.GnssCommandReceiver -a com.example.gnsslogger.ACTION_UPDATE_SCENE --es scene_name "video_play_scene"
 ```
 
-`scene_name` 为空或缺失时，应用会写入 `unknown_scene`。
+协议 v1 使用同一 Android 单调时钟上的 events.jsonl 与卫星 CSV 关联场景。
 
 每个会话默认生成：
 
@@ -145,7 +142,7 @@ App 会按定位精度写入 `quality` 字段，并在首页显示中文质量�
 
 ### `*_satellites.csv`
 
-`timestamp_ms,timestamp_iso,elapsed_realtime_nanos,device_model,android_version,package_version,session_id,scene_name,provider,latitude,longitude,altitude,accuracy,speed,bearing,satellite_count,used_in_fix_count,constellation_type,constellation_name,svid,cn0_dbhz,elevation_deg,azimuth_deg,used_in_fix,carrier_frequency_hz,baseband_cn0_dbhz,has_almanac,has_ephemeris`
+`timestamp_ms,timestamp_iso,elapsed_realtime_nanos,device_model,android_version,package_version,session_id,provider,latitude,longitude,altitude,accuracy,speed,bearing,satellite_count,used_in_fix_count,constellation_type,constellation_name,svid,cn0_dbhz,elevation_deg,azimuth_deg,used_in_fix,carrier_frequency_hz,baseband_cn0_dbhz,has_almanac,has_ephemeris`
 
 - 同一帧 `GnssStatus` 回调内所有卫星共享相同的 `timestamp_ms` / `timestamp_iso`。
 - 无定位点时经纬度等可为空。
@@ -155,14 +152,14 @@ App 会按定位精度写入 `quality` 字段，并在首页显示中文质量�
 
 ### `*_raw.csv`
 
-`timestamp_ms,timestamp_iso,elapsed_realtime_nanos,device_model,android_version,package_version,session_id,scene_name,clock_time_nanos,clock_full_bias_nanos,clock_bias_nanos,clock_bias_uncertainty_nanos,clock_drift_nanos_per_second,clock_drift_uncertainty_nanos_per_second,hardware_clock_discontinuity_count,constellation_type,constellation_name,svid,time_offset_nanos,state,received_sv_time_nanos,received_sv_time_uncertainty_nanos,cn0_dbhz,pseudorange_rate_mps,pseudorange_rate_uncertainty_mps,accumulated_delta_range_state,accumulated_delta_range_m,accumulated_delta_range_uncertainty_m,carrier_frequency_hz,baseband_cn0_dbhz,automatic_gain_control_db,snr_db,multipath_indicator`
+`timestamp_ms,timestamp_iso,elapsed_realtime_nanos,device_model,android_version,package_version,session_id,clock_time_nanos,clock_full_bias_nanos,clock_bias_nanos,clock_bias_uncertainty_nanos,clock_drift_nanos_per_second,clock_drift_uncertainty_nanos_per_second,hardware_clock_discontinuity_count,constellation_type,constellation_name,svid,time_offset_nanos,state,received_sv_time_nanos,received_sv_time_uncertainty_nanos,cn0_dbhz,pseudorange_rate_mps,pseudorange_rate_uncertainty_mps,accumulated_delta_range_state,accumulated_delta_range_m,accumulated_delta_range_uncertainty_m,carrier_frequency_hz,baseband_cn0_dbhz,automatic_gain_control_db,snr_db,multipath_indicator`
 
 - 同一帧 Raw GNSS 回调内所有 measurement 共享相同的 `clock_*` 字段。
 - 设备或芯片不支持的字段为空。
 
 ### `*_nmea.csv`
 
-`timestamp_ms,timestamp_iso,elapsed_realtime_nanos,device_model,android_version,package_version,session_id,scene_name,nmea_timestamp_ms,message`
+`timestamp_ms,timestamp_iso,elapsed_realtime_nanos,device_model,android_version,package_version,session_id,nmea_timestamp_ms,message`
 
 - `message` 保留原始 NMEA 句子内容。
 - `nmea_timestamp_ms` 来自 Android NMEA 回调。
@@ -178,7 +175,7 @@ App 会按定位精度写入 `quality` 字段，并在首页显示中文质量�
 
 1. 安装固定包名 `com.example.gnsslogger` 的构建产物。
 2. 首次建议通过 UI 完成权限授权；无人值守可在支持设备上使用 `adb shell pm grant` 授予运行时权限（视 ROM 策略而定）。
-3. 用 **开始/停止** 广播控制采集生命周期；在切换用例时发送 **更新场景** 广播，后续 CSV 行中的 `scene_name` 即切换为新值。
+3. 旧广播用于普通采集。Windows 测试使用 shell 专用协议 v1 的会话和事件标记。
 4. 拉取 `Android/data/com.example.gnsslogger/files/gnss/` 下 CSV 与自动化框架对齐时间轴与用例 ID。
 5. 也可以通过 App 内 **分享本次数据** 或 **保存到下载目录** 导出当前会话文件。
 
