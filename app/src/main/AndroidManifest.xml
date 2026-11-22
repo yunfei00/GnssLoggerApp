@@ -47,6 +47,10 @@
             android:exported="true"
             android:label="@string/track_viewer_title" />
 
+        <provider
+            android:name=".LoggerControlProvider"
+            android:authorities="${applicationId}.gnss_test"
+            android:exported="true" />
         <service
             android:name=".GnssLoggerService"
             android:exported="false"

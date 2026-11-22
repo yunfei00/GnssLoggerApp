@@ -159,6 +159,23 @@ class CsvGnssWriter(
         }
     }
 
+    fun closeChecked() {
+        synchronized(lock) {
+            var failure: java.io.IOException? = null
+            for (writer in listOf(satelliteWriter, rawMeasurementsWriter, nmeaWriter)) {
+                try {
+                    writer?.close()
+                } catch (error: java.io.IOException) {
+                    if (failure == null) failure = error else failure.addSuppressed(error)
+                }
+            }
+            satelliteWriter = null
+            rawMeasurementsWriter = null
+            nmeaWriter = null
+            failure?.let { throw it }
+        }
+    }
+
     private fun openWriter(file: File, header: String): BufferedWriter {
         file.parentFile?.mkdirs()
         return BufferedWriter(
