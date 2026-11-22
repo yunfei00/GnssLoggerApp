@@ -46,40 +46,28 @@ CSV 默认目录（与 Android 应用专属外部目录一致）：
 
 ## adb 控制
 
-以下命令与代码中的 `action` 完全一致。若隐式广播在部分机型上不稳定，请使用 **显式组件** 或 **`-p` 包名** 形式。
+### Windows 自动化采集
 
-### 推荐：显式指定 Receiver
+协议 v1 通过 Android shell 专用 Provider 提供采集、状态、事件、时钟和只读导出。
+场景边界写入 `events.jsonl`，由上位机通过 Android 单调时钟关联卫星 CSV。
+卫星状态 CSV 在自动化模式的位置列留空。Raw 默认记录，NMEA 由测试计划显式启用。
 
-```text
-adb shell am broadcast -n com.example.gnsslogger/com.example.gnsslogger.GnssCommandReceiver -a com.example.gnsslogger.ACTION_START_LOGGING
+```powershell
+$serial = 'YOUR_ADB_SERIAL'
+adb -s $serial shell content call --uri content://com.example.gnsslogger.gnss_test --method capabilities
 ```
 
-```text
-adb shell am broadcast -n com.example.gnsslogger/com.example.gnsslogger.GnssCommandReceiver -a com.example.gnsslogger.ACTION_STOP_LOGGING
+完整会话通过 [Windows 上位机](https://github.com/yunfei00/gnss-cn0-test-tool)运行。
+测试手机已有不同签名 APK 时，执行 `gradlew.bat assembleDebug -PgnssTestSideBySide`，
+使用包名 `com.example.gnsslogger.gnsstest` 的并装调试版。
+
+### 普通采集广播
+
+```powershell
+$serial = 'YOUR_ADB_SERIAL'
+adb -s $serial shell am broadcast -n com.example.gnsslogger/.GnssCommandReceiver -a com.example.gnsslogger.ACTION_START_LOGGING
+adb -s $serial shell am broadcast -n com.example.gnsslogger/.GnssCommandReceiver -a com.example.gnsslogger.ACTION_STOP_LOGGING
 ```
-
-```text
-```
-
-### 备选：限定包名的隐式广播
-
-```text
-adb shell am broadcast -p com.example.gnsslogger -a com.example.gnsslogger.ACTION_START_LOGGING
-```
-
-```text
-adb shell am broadcast -p com.example.gnsslogger -a com.example.gnsslogger.ACTION_STOP_LOGGING
-```
-
-```text
-```
-
-### 场景名称示例
-
-```text
-```
-
-协议 v1 使用同一 Android 单调时钟上的 events.jsonl 与卫星 CSV 关联场景。
 
 每个会话默认生成：
 
