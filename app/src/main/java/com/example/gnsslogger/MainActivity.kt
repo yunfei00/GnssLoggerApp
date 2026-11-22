@@ -15,12 +15,15 @@ import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.isVisible
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory
 import androidx.lifecycle.lifecycleScope
@@ -105,6 +108,10 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         binding.root.applySystemBarPadding()
+        val dark = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+        WindowCompat.getInsetsController(window, binding.root).isAppearanceLightStatusBars = !dark
+        WindowCompat.getInsetsController(window, binding.root).isAppearanceLightNavigationBars = !dark
 
         binding.recyclerSatellites.layoutManager = LinearLayoutManager(this)
         binding.recyclerSatellites.adapter = adapter
@@ -127,6 +134,22 @@ class MainActivity : AppCompatActivity() {
         binding.buttonViewCurrentTrack.setOnClickListener { viewCurrentTrack() }
         binding.buttonLoadTrackFiles.setOnClickListener { openTrackViewerPicker() }
         binding.buttonCleanupHistory.setOnClickListener { confirmCleanupHistoryData() }
+        binding.buttonCurrent.setOnClickListener { showPanel(binding.panelCurrent) }
+        binding.buttonDetails.setOnClickListener { showPanel(binding.panelDetails) }
+        binding.buttonConfig.setOnClickListener { showPanel(binding.panelConfig) }
+        binding.buttonHistory.setOnClickListener { showPanel(binding.panelHistory) }
+        binding.buttonBackToHome.setOnClickListener { showPanel(binding.panelHome) }
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (binding.panelHome.isVisible) {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                    isEnabled = true
+                } else {
+                    showPanel(binding.panelHome)
+                }
+            }
+        })
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -135,6 +158,16 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun showPanel(active: View) {
+        if (binding.panelConfig.isVisible && active != binding.panelConfig) {
+            persistUiFromForm()
+        }
+        listOf(binding.panelHome, binding.panelCurrent, binding.panelDetails, binding.panelConfig, binding.panelHistory)
+            .forEach { it.isVisible = it == active }
+        binding.buttonBackToHome.isVisible = active != binding.panelHome
+        binding.root.scrollTo(0, 0)
     }
 
     private fun loadFormFromPrefs() {
@@ -195,22 +228,40 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderState(state: GnssSessionState) {
-        binding.textStatus.text = when (state.status) {
-            LoggingUiStatus.IDLE -> getString(R.string.status_idle)
-            LoggingUiStatus.LOGGING -> getString(R.string.status_logging)
-            LoggingUiStatus.STOPPED -> getString(R.string.status_stopped)
+        val logging = state.status == LoggingUiStatus.LOGGING
+        val controlled = logging && GnssLoggerService.activeTestRun() != null
+        val errorMessage = state.lastError?.takeUnless(::isExportInfoMessage)
+        val status = when {
+            errorMessage != null -> R.string.operator_error
+            logging && state.recordingPhase == GnssRecordingPhase.WARMING_UP -> R.string.operator_warmup
+            logging -> R.string.operator_recording
+            state.status == LoggingUiStatus.STOPPED -> R.string.operator_done
+            else -> R.string.operator_idle
         }
+        val statusText = getString(status)
+        if (binding.textStatus.text != statusText) binding.textStatus.text = statusText
+        binding.textControlSource.setText(R.string.operator_windows)
+        binding.textControlSource.isVisible = controlled
+        binding.buttonStart.isVisible = !logging
+        binding.buttonStop.isVisible = logging && !controlled
+        val hasResult = state.status == LoggingUiStatus.STOPPED && state.sessionId != null
+        binding.buttonShareCsv.isEnabled = hasResult
+        binding.buttonSaveDownloads.isEnabled = hasResult
+        binding.buttonViewCurrentTrack.isEnabled = hasResult && (state.trackPointCount > 0 || state.kmlGenerated)
+        binding.buttonCleanupHistory.isEnabled = !logging
         binding.textCsvPath.text = buildString {
+            if (!hasResult) {
+                append(getString(R.string.operator_current_empty))
+                return@buildString
+            }
             append(
                 getString(
                     R.string.label_file_status,
                     buildFileStatusLines(state).joinToString(separator = "\n"),
                 ),
             )
-            if (state.sessionId != null) {
-                append('\n')
-                append(getString(R.string.label_session, state.sessionId))
-            }
+            append('\n')
+            append(getString(R.string.label_session, state.sessionId))
         }
         val exportStatus = buildExportStatusText(state)
         if (exportStatus.isNullOrBlank()) {
@@ -247,7 +298,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
         binding.textLastUpdate.text = getString(R.string.label_last_update, last)
-        val errorMessage = state.lastError?.takeUnless(::isExportInfoMessage)
         if (errorMessage.isNullOrBlank()) {
             binding.textError.visibility = View.GONE
         } else {
@@ -255,7 +305,8 @@ class MainActivity : AppCompatActivity() {
             binding.textError.text = errorMessage
         }
         if (state.satellites.isEmpty()) {
-            binding.textSatelliteTableHint.visibility = View.GONE
+            binding.textSatelliteTableHint.setText(R.string.operator_no_satellites)
+            binding.textSatelliteTableHint.visibility = View.VISIBLE
         } else {
             binding.textSatelliteTableHint.visibility = View.VISIBLE
             binding.textSatelliteTableHint.text = getString(
@@ -278,13 +329,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun buildGnssStatusText(state: GnssSessionState): String =
         buildList {
-            add("当前精度：${state.currentAccuracyM?.let { formatMeters(it) } ?: "--"}")
-            add("定位质量：${qualityLabel(state.currentAccuracyM)}")
-            add("可见卫星：${state.visibleSatelliteCount}")
-            add("参与定位：${state.usedInFixCount}")
-            add("平均 CN0：${state.averageCn0DbHz?.let { String.format(java.util.Locale.US, "%.1f dB-Hz", it) } ?: "--"}")
-            add("采集状态：${recordingPhaseLabel(state)}")
-            add("是否可以正式记录：${if (state.canStartFormalRecording || state.recordingPhase != GnssRecordingPhase.WARMING_UP) "是" else "否"}")
+            add(getString(
+                R.string.operator_metrics,
+                formatDuration(state.recordingDurationMs),
+                state.visibleSatelliteCount,
+                state.usedInFixCount,
+                state.averageCn0DbHz?.let { String.format(Locale.US, "%.1f dB-Hz", it) } ?: "—",
+            ))
             state.gnssFixWarning?.let { add(it) }
             state.nmeaWarning?.let { add(it) }
         }.joinToString(separator = "\n")
@@ -301,24 +352,6 @@ class MainActivity : AppCompatActivity() {
             add("KML：${if (state.kmlGenerated) "已生成" else "未生成"}")
         }.joinToString(separator = "\n")
     }
-
-    private fun qualityLabel(accuracyM: Float?): String =
-        when {
-            accuracyM == null || !accuracyM.isFinite() -> "--"
-            accuracyM <= 5f -> "优秀"
-            accuracyM <= 10f -> "良好"
-            accuracyM <= 20f -> "一般"
-            else -> "较差"
-        }
-
-    private fun recordingPhaseLabel(state: GnssSessionState): String =
-        when (state.recordingPhase) {
-            GnssRecordingPhase.WARMING_UP -> "预热中"
-            GnssRecordingPhase.RECORDING -> "正式记录中"
-            GnssRecordingPhase.POOR_ACCURACY -> "精度较差"
-            GnssRecordingPhase.STOPPED -> "已停止"
-            GnssRecordingPhase.IDLE -> "未启动"
-        }
 
     private fun formatMeters(value: Float): String =
         String.format(java.util.Locale.US, "%.1f m", value)

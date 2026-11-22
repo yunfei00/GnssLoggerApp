@@ -65,4 +65,17 @@
     <string name="display_mode_track_canvas">轨迹图</string>
     <string name="display_mode_osm_map">地图</string>
     <string name="track_map_description">OpenStreetMap 轨迹地图</string>
+    <string name="operator_current">本次记录</string>
+    <string name="operator_details">卫星明细</string>
+    <string name="operator_history">历史管理</string>
+    <string name="operator_back">返回采集首页</string>
+    <string name="operator_idle">待采集</string>
+    <string name="operator_warmup">预热中</string>
+    <string name="operator_recording">采集中</string>
+    <string name="operator_done">已完成</string>
+    <string name="operator_error">采集异常</string>
+    <string name="operator_windows">Windows 正在控制采集，请在电脑端结束任务。</string>
+    <string name="operator_metrics">采集时长  %1$s\n可见卫星  %2$d　参与定位  %3$d\n平均 C/N₀  %4$s</string>
+    <string name="operator_current_empty">完成一次采集后，可在这里查看、保存或分享本次记录。</string>
+    <string name="operator_no_satellites">尚未收到卫星观测。</string>
 </resources>

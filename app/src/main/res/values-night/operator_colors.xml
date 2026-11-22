@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="operator_background">#101923</color>
+    <color name="operator_primary">#A9C7FF</color>
+    <color name="operator_on_primary">#102E59</color>
+</resources>

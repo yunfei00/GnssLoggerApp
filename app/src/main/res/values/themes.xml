@@ -3,5 +3,9 @@
 
     <style name="Theme.GnssLoggerApp" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowBackground">@color/operator_background</item>
+        <item name="colorSurface">@color/operator_background</item>
+        <item name="colorPrimary">@color/operator_primary</item>
+        <item name="colorOnPrimary">@color/operator_on_primary</item>
     </style>
 </resources>
