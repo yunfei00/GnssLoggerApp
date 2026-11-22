@@ -45,7 +45,7 @@ import java.util.concurrent.atomic.AtomicLong
 class GnssLoggerService : Service() {
 
     @Volatile private var isLogging = false
-    private var testRun: LoggerRun? = null
+    @Volatile private var testRun: LoggerRun? = null
     private var testCollectNmea = false
     private var testCollectRaw = true
     @Volatile private var testWriteFailed = false
@@ -430,7 +430,7 @@ class GnssLoggerService : Service() {
                             sessionDirectoryPath = sessionDirectoryPath,
                             locationCsvPath = locationCsvPath,
                             trackKmlPath = trackKmlPath,
-                            )
+                        )
                     }
                 }
             } catch (e: Exception) {
@@ -769,8 +769,11 @@ class GnssLoggerService : Service() {
         }
 
         try {
-            csvWriter?.closeSafely()
+            val writer = csvWriter
+            if (testRun == null) writer?.closeSafely() else writer?.closeChecked()
             locationCsvLogger?.closeSafely()
+        } catch (_: java.io.IOException) {
+            testWriteFailed = true
         } finally {
             csvWriter = null
             locationCsvLogger = null
