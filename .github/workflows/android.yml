@@ -34,11 +34,11 @@ jobs:
           java-version: "21"
           cache: gradle
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android SDK packages
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$sdkmanager"
+          "$sdkmanager" --install "platforms;android-35" "build-tools;34.0.0" "build-tools;35.0.0"
 
       - name: Prepare release keystore
         if: env.ANDROID_KEYSTORE_BASE64 != ''
@@ -73,6 +73,18 @@ jobs:
           fi
 
           ls -la "$APK_OUTPUT_DIR"
+
+      - name: Build side-by-side test APK
+        run: |
+          ./gradlew --no-daemon :app:assembleDebug -PgnssTestSideBySide
+          cp app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/GnssLoggerApp-gnsstest.apk"
+
+      - name: Upload side-by-side APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gnss-logger-side-by-side-apk
+          path: ${{ runner.temp }}/GnssLoggerApp-gnsstest.apk
+          if-no-files-found: error
 
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
