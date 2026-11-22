@@ -176,14 +176,18 @@ class LoggerControlProvider : ContentProvider() {
         val run = LoggerRun(app, id)
         when (method) {
             "start" -> {
-                if (args.size > 2 || (args.size == 2 && args[1] != "nmea")) return errorReply("INVALID_OPTIONS")
+                val options = args.drop(1)
+                if (options.size != options.toSet().size || options.any { it !in setOf("nmea", "status_only") }) {
+                    return errorReply("INVALID_OPTIONS")
+                }
                 if (run.read() == null) {
                     run.transition("STARTING")
                     check(run.events.createNewFile())
                     try {
                         ContextCompat.startForegroundService(app, Intent(app, GnssLoggerService::class.java)
                             .setAction(AppActions.ACTION_START_LOGGING).putExtra("test_run_id", id)
-                            .putExtra("test_collect_nmea", args.size == 2))
+                            .putExtra("test_collect_nmea", "nmea" in options)
+                            .putExtra("test_collect_raw", "status_only" !in options))
                     } catch (error: RuntimeException) {
                         run.transition("ERROR", reason = "FOREGROUND_START_DENIED")
                     }

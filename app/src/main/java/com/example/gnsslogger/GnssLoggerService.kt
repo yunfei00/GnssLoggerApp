@@ -47,6 +47,7 @@ class GnssLoggerService : Service() {
     @Volatile private var isLogging = false
     private var testRun: LoggerRun? = null
     private var testCollectNmea = false
+    private var testCollectRaw = true
     @Volatile private var testWriteFailed = false
     private var gnssThread: HandlerThread? = null
     private var collector: GnssCollector? = null
@@ -164,6 +165,7 @@ class GnssLoggerService : Service() {
                 if (!isLogging) {
                     testRun = requested
                     testCollectNmea = intent.getBooleanExtra("test_collect_nmea", false)
+                    testCollectRaw = intent.getBooleanExtra("test_collect_raw", true)
                     testWriteFailed = false
                     NotificationHelper.ensureChannel(this)
                     startForegroundWithType(
@@ -249,10 +251,10 @@ class GnssLoggerService : Service() {
             csvFileName = paths.satelliteCsvFileName
         } else {
             sessionId = UUID.randomUUID().toString()
-            recordRawMeasurements = true
+            recordRawMeasurements = testCollectRaw
             recordNmea = testCollectNmea
             csvPath = File(run.directory, "satellites.csv").absolutePath
-            rawCsvPath = File(run.directory, "raw.csv").absolutePath
+            rawCsvPath = if (recordRawMeasurements) File(run.directory, "raw.csv").absolutePath else null
             nmeaCsvPath = if (recordNmea) File(run.directory, "nmea.csv").absolutePath else null
             nmeaTextPath = if (recordNmea) File(run.directory, "standard.nmea").absolutePath else null
             locationCsvPath = null
