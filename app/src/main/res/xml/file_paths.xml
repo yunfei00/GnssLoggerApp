@@ -6,4 +6,7 @@
     <files-path
         name="internal_gnss_root"
         path="gnss/" />
+    <files-path
+        name="windows_run_exports"
+        path="gnss-test/" />
 </paths>
